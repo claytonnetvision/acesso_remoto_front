@@ -14,6 +14,7 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
 export const clientStatusEnum = pgEnum("client_status", ["active", "inactive", "suspended"]);
 export const serverStatusEnum = pgEnum("server_status", ["online", "offline", "unknown", "maintenance"]);
 export const accessActionEnum = pgEnum("access_action", ["connect", "disconnect", "view_credentials", "create", "update", "delete"]);
+export const osTypeEnum = pgEnum("os_type", ["win2008r2", "win2012r2", "win2016plus", "win7", "win10", "win11", "other"]);
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const users = pgTable("users", {
@@ -27,6 +28,7 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
   passwordHash: text("passwordHash"),
+  blocked: boolean("blocked").default(false).notNull(),
 });
 
 export type User = typeof users.$inferSelect;
@@ -59,12 +61,14 @@ export const servers = pgTable("servers", {
   ipAddress: varchar("ipAddress", { length: 45 }).notNull(),
   rdpPort: integer("rdpPort").default(3389).notNull(),
   operatingSystem: varchar("operatingSystem", { length: 100 }),
+  osType: osTypeEnum("osType").default("win2016plus"),
   description: text("description"),
   notes: text("notes"),
   status: serverStatusEnum("status").default("unknown").notNull(),
   lastCheckedAt: timestamp("lastCheckedAt"),
   frpToken: varchar("frpToken", { length: 64 }),
   frpRemotePort: integer("frpRemotePort"),
+  enableMetrics: boolean("enableMetrics").default(true).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   createdBy: integer("createdBy").references(() => users.id),
