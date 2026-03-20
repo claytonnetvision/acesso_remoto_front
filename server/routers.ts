@@ -418,13 +418,20 @@ export const appRouter = router({
   users: router({
     // Listar todos os usuários (admin)
     list: adminProcedure.query(async () => {
-      return db.listUsers();
+      const rows = await db.listUsers();
+      // Garantir que campos null não causem erro de serialização
+      return rows.map((u) => ({
+        ...u,
+        name: u.name ?? "",
+        email: u.email ?? "",
+        loginMethod: u.loginMethod ?? "oauth",
+      }));
     }),
     // Criar usuário local (admin)
     create: adminProcedure
       .input(z.object({
         name: z.string().min(2),
-        email: z.string().email(),
+        email: z.string().min(1).refine((v) => v.includes("@") && v.includes("."), { message: "E-mail inválido." }),
         password: z.string().min(6),
         role: z.enum(["user", "admin"]).default("user"),
       }))
