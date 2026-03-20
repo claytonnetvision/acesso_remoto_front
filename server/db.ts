@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -106,10 +106,10 @@ export async function getClients(search?: string) {
       .from(clients)
       .where(
         or(
-          like(clients.name, `%${search}%`),
-          like(clients.contactName, `%${search}%`),
-          like(clients.contactEmail, `%${search}%`),
-          like(clients.cnpj, `%${search}%`)
+          ilike(clients.name, `%${search}%`),
+          ilike(clients.contactName, `%${search}%`),
+          ilike(clients.contactEmail, `%${search}%`),
+          ilike(clients.cnpj, `%${search}%`)
         )
       )
       .orderBy(desc(clients.createdAt));
@@ -152,9 +152,9 @@ export async function getServers(clientId?: number, search?: string) {
   if (search) {
     conditions.push(
       or(
-        like(servers.hostname, `%${search}%`),
-        like(servers.ipAddress, `%${search}%`),
-        like(servers.description, `%${search}%`)
+        ilike(servers.hostname, `%${search}%`),
+        ilike(servers.ipAddress, `%${search}%`),
+        ilike(servers.description, `%${search}%`)
       )
     );
   }
