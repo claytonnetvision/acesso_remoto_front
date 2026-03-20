@@ -66,9 +66,10 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     .onConflictDoUpdate({
       target: users.openId,
       set: {
-        name: user.name ?? null,
-        email: user.email ?? null,
-        loginMethod: user.loginMethod ?? null,
+        // Usa COALESCE para nunca sobrescrever com null: mantém o valor existente se o novo for null
+        name: sql`COALESCE(${user.name ?? null}, users."name")`,
+        email: sql`COALESCE(${user.email ?? null}, users."email")`,
+        loginMethod: sql`COALESCE(${user.loginMethod ?? null}, users."loginMethod")`,
         updatedAt: now,
         lastSignedIn: user.lastSignedIn ?? now,
       },
