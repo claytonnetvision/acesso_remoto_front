@@ -82,6 +82,7 @@ function generateInstallBat(opts: {
 :: ============================================================
 :: Remote Access Manager - Agent Installer
 :: Server: ${opts.serverName} (ID: ${opts.serverId})
+:: Compatible with Windows Server 2012 R2 and later
 :: ============================================================
 :: Run this script as Administrator!
 
@@ -91,6 +92,8 @@ set SERVICE_NAME=RemoteAccessAgent
 set SERVICE_DIR=C:\\RemoteAccessAgent
 set FRPC_EXE=C:\\RemoteAccessAgent\\frpc.exe
 set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.toml
+set NSSM_EXE=C:\\RemoteAccessAgent\\nssm.exe
+set NSSM_URL=http://31.97.16.12/nssm.exe
 
 echo.
 echo  ============================================================
@@ -109,11 +112,11 @@ if %errorLevel% neq 0 (
 )
 
 :: Create directory
-echo [1/5] Creating installation directory...
+echo [1/6] Creating installation directory...
 if not exist "%SERVICE_DIR%" mkdir "%SERVICE_DIR%"
 
 :: Copy files
-echo [2/5] Copying agent files...
+echo [2/6] Copying agent files...
 copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul
 if errorlevel 1 (
     echo [ERROR] frpc.exe not found in this folder!
@@ -127,20 +130,36 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Download NSSM if not present (service manager compatible with WS2012 R2)
+echo [3/6] Checking NSSM service manager...
+if exist "%~dp0nssm.exe" (
+    echo  Found nssm.exe in package, copying...
+    copy /Y "%~dp0nssm.exe" "%NSSM_EXE%" >nul
+) else if not exist "%NSSM_EXE%" (
+    echo  Downloading NSSM from management server...
+    certutil -urlcache -split -f "%NSSM_URL%" "%NSSM_EXE%" >nul 2>&1
+    if not exist "%NSSM_EXE%" (
+        echo [ERROR] Failed to download NSSM. Check internet connection.
+        echo  Try manually: certutil -urlcache -split -f %NSSM_URL% %NSSM_EXE%
+        pause
+        exit /b 1
+    )
+    echo  NSSM downloaded successfully.
+)
+
 :: Remove existing service if present
-echo [3/5] Removing previous service (if any)...
+echo [4/6] Removing previous service (if any)...
 sc query "%SERVICE_NAME%" >nul 2>&1
 if %errorLevel% equ 0 (
-    sc stop "%SERVICE_NAME%" >nul 2>&1
+    "%NSSM_EXE%" stop "%SERVICE_NAME%" >nul 2>&1
     timeout /t 3 /nobreak >nul
-    sc delete "%SERVICE_NAME%" >nul 2>&1
+    "%NSSM_EXE%" remove "%SERVICE_NAME%" confirm >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
 
-:: Install as Windows Service using sc.exe
-echo [4/5] Installing Windows Service...
-sc create %SERVICE_NAME% binPath= "C:\\RemoteAccessAgent\\frpc.exe -c C:\\RemoteAccessAgent\\frpc.toml" DisplayName= "Remote Access Manager Agent" start= auto
-
+:: Install as Windows Service using NSSM
+echo [5/6] Installing Windows Service (NSSM)...
+"%NSSM_EXE%" install "%SERVICE_NAME%" "%FRPC_EXE%" "-c %FRPC_CFG%"
 if %errorLevel% neq 0 (
     echo [ERROR] Failed to create service!
     echo Make sure you are running as Administrator.
@@ -148,17 +167,18 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-:: Set description
-sc description "%SERVICE_NAME%" "Maintains secure tunnel to Remote Access Manager server" >nul 2>&1
-
-:: Set recovery options (restart on failure)
-sc failure "%SERVICE_NAME%" reset= 86400 actions= restart/5000/restart/10000/restart/30000
+"%NSSM_EXE%" set "%SERVICE_NAME%" DisplayName "Remote Access Manager Agent" >nul
+"%NSSM_EXE%" set "%SERVICE_NAME%" Description "Maintains secure tunnel to Remote Access Manager server" >nul
+"%NSSM_EXE%" set "%SERVICE_NAME%" Start SERVICE_AUTO_START >nul
+"%NSSM_EXE%" set "%SERVICE_NAME%" AppRestartDelay 5000 >nul
+"%NSSM_EXE%" set "%SERVICE_NAME%" AppStdout "%SERVICE_DIR%\\frpc.log" >nul
+"%NSSM_EXE%" set "%SERVICE_NAME%" AppStderr "%SERVICE_DIR%\\frpc-error.log" >nul
 
 :: Start service
-echo [5/5] Starting service...
-sc start "%SERVICE_NAME%"
+echo [6/6] Starting service...
+"%NSSM_EXE%" start "%SERVICE_NAME%"
 
-timeout /t 3 /nobreak >nul
+timeout /t 5 /nobreak >nul
 
 :: Verify
 sc query "%SERVICE_NAME%" | find "RUNNING" >nul
@@ -169,8 +189,16 @@ if %errorLevel% equ 0 (
     echo.
 ) else (
     echo.
-    echo  [WARNING] Service may not have started. Check Event Viewer for details.
-    echo  Try: sc start %SERVICE_NAME%
+    echo  [WARNING] Service may not have started. Trying once more...
+    "%NSSM_EXE%" start "%SERVICE_NAME%" >nul 2>&1
+    timeout /t 5 /nobreak >nul
+    sc query "%SERVICE_NAME%" | find "RUNNING" >nul
+    if %errorLevel% equ 0 (
+        echo  [OK] Agent started successfully!
+    ) else (
+        echo  [ERROR] Service failed to start. Check logs:
+        echo  %SERVICE_DIR%\\frpc-error.log
+    )
     echo.
 )
 
