@@ -416,8 +416,80 @@ export const appRouter = router({
 
   // ─── Users ───────────────────────────────────────────────────────────────────
   users: router({
+    // Listar todos os usuários (admin)
     list: adminProcedure.query(async () => {
-      return db.getAllUsers();
+      return db.listUsers();
+    }),
+    // Criar usuário local (admin)
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(2),
+        email: z.string().email(),
+        password: z.string().min(6),
+        role: z.enum(["user", "admin"]).default("user"),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const existing = await db.getUserByEmail(input.email);
+        if (existing) throw new TRPCError({ code: "CONFLICT", message: "E-mail já cadastrado." });
+        const passwordHash = crypto.createHash("sha256").update(input.password + "remote-manager-salt").digest("hex");
+        const user = await db.createLocalUser({ name: input.name, email: input.email, passwordHash, role: input.role });
+        await logAction(ctx.user.id, "create", "server", undefined, `Usuário criado: ${input.email}`);
+        return { success: true, userId: user.id };
+      }),
+    // Trocar senha (admin pode trocar de qualquer um; usuário só a própria)
+    setPassword: protectedProcedure
+      .input(z.object({
+        userId: z.number(),
+        newPassword: z.string().min(6),
+        currentPassword: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const isAdmin = ctx.user.role === "admin";
+        const isSelf = ctx.user.id === input.userId;
+        if (!isAdmin && !isSelf) throw new TRPCError({ code: "FORBIDDEN" });
+        if (isSelf && !isAdmin) {
+          const user = await db.getUserById(input.userId);
+          if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+          if (user.passwordHash) {
+            const currentHash = crypto.createHash("sha256").update((input.currentPassword ?? "") + "remote-manager-salt").digest("hex");
+            if (currentHash !== user.passwordHash) throw new TRPCError({ code: "UNAUTHORIZED", message: "Senha atual incorreta." });
+          }
+        }
+        const passwordHash = crypto.createHash("sha256").update(input.newPassword + "remote-manager-salt").digest("hex");
+        await db.updateUserPasswordHash(input.userId, passwordHash);
+        return { success: true };
+      }),
+    // Bloquear/desbloquear usuário (admin)
+    toggleBlock: adminProcedure
+      .input(z.object({ userId: z.number(), blocked: z.boolean() }))
+      .mutation(async ({ input, ctx }) => {
+        if (ctx.user.id === input.userId) throw new TRPCError({ code: "BAD_REQUEST", message: "Você não pode bloquear a si mesmo." });
+        await db.toggleUserBlocked(input.userId, input.blocked);
+        await logAction(ctx.user.id, "update", "server", undefined, `Usuário ${input.blocked ? "bloqueado" : "desbloqueado"}: ID ${input.userId}`);
+        return { success: true };
+      }),
+    // Excluir usuário (admin)
+    delete: adminProcedure
+      .input(z.object({ userId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        if (ctx.user.id === input.userId) throw new TRPCError({ code: "BAD_REQUEST", message: "Você não pode excluir a si mesmo." });
+        await db.deleteUser(input.userId);
+        return { success: true };
+      }),
+    // Perfil do usuário logado
+    me: protectedProcedure.query(async ({ ctx }) => {
+      const user = await db.getUserById(ctx.user.id);
+      if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        loginMethod: user.loginMethod,
+        blocked: user.blocked,
+        createdAt: user.createdAt,
+        lastSignedIn: user.lastSignedIn,
+      };
     }),
   }),
 

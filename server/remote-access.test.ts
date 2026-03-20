@@ -1,260 +1,384 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { appRouter } from "./routers";
-import type { TrpcContext } from "./_core/context";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { getLoginUrl } from "@/const";
+import { useIsMobile } from "@/hooks/useMobile";
+import {
+  Activity,
+  BarChart2,
+  Building2,
+  FileKey,
+  LayoutDashboard,
+  Link2,
+  LogOut,
+  Monitor,
+  PanelLeft,
+  Settings,
+  Shield,
+  Users,
+  Cpu,
+  Wifi,
+  KeyRound,
+} from "lucide-react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
+import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
-// ─── Mock db module ───────────────────────────────────────────────────────────
-vi.mock("./db", () => ({
-  getDashboardStats: vi.fn().mockResolvedValue({
-    totalClients: 5,
-    totalServers: 10,
-    onlineServers: 7,
-    recentLogs: [],
-  }),
-  getClients: vi.fn().mockResolvedValue([
-    { id: 1, name: "Empresa ABC", status: "active", cnpj: "00.000.000/0001-00", contactName: "João", contactEmail: "joao@abc.com", contactPhone: "11999999999", address: null, notes: null, createdAt: new Date(), updatedAt: new Date(), createdBy: 1 },
-  ]),
-  getClientById: vi.fn().mockResolvedValue({
-    id: 1, name: "Empresa ABC", status: "active",
-  }),
-  createClient: vi.fn().mockResolvedValue({}),
-  updateClient: vi.fn().mockResolvedValue({}),
-  deleteClient: vi.fn().mockResolvedValue({}),
-  getServers: vi.fn().mockResolvedValue([
-    { id: 1, clientId: 1, hostname: "SRV-01", ipAddress: "192.168.1.10", rdpPort: 3389, status: "online", operatingSystem: "Windows Server 2022", description: null, notes: null, createdAt: new Date(), updatedAt: new Date(), createdBy: 1, lastCheckedAt: null },
-  ]),
-  getServerById: vi.fn().mockResolvedValue({
-    id: 1, clientId: 1, hostname: "SRV-01", ipAddress: "192.168.1.10", rdpPort: 3389, status: "online",
-  }),
-  createServer: vi.fn().mockResolvedValue({}),
-  updateServer: vi.fn().mockResolvedValue({}),
-  deleteServer: vi.fn().mockResolvedValue({}),
-  getCredentialsByServer: vi.fn().mockResolvedValue([
-    { id: 1, serverId: 1, label: "Admin", username: "administrator", passwordEncrypted: "abc:def", domain: null, notes: null, isDefault: true, createdAt: new Date(), updatedAt: new Date(), createdBy: 1 },
-  ]),
-  getCredentialById: vi.fn().mockResolvedValue({
-    id: 1, serverId: 1, label: "Admin", username: "administrator", passwordEncrypted: "abc:def", domain: null, isDefault: true,
-  }),
-  createCredential: vi.fn().mockResolvedValue({}),
-  updateCredential: vi.fn().mockResolvedValue({}),
-  deleteCredential: vi.fn().mockResolvedValue({}),
-  getLinks: vi.fn().mockResolvedValue([]),
-  createLink: vi.fn().mockResolvedValue({}),
-  updateLink: vi.fn().mockResolvedValue({}),
-  deleteLink: vi.fn().mockResolvedValue({}),
-  getPermissionsByServer: vi.fn().mockResolvedValue([]),
-  getPermissionsByUser: vi.fn().mockResolvedValue([]),
-  upsertPermission: vi.fn().mockResolvedValue({}),
-  deletePermission: vi.fn().mockResolvedValue({}),
-  createAccessLog: vi.fn().mockResolvedValue({}),
-  getAccessLogs: vi.fn().mockResolvedValue([]),
-  getAllUsers: vi.fn().mockResolvedValue([]),
-  upsertUser: vi.fn().mockResolvedValue(undefined),
-  getUserByOpenId: vi.fn().mockResolvedValue(undefined),
-}));
+const mainMenu = [
+  { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+  { icon: Building2, label: "Clientes", path: "/clients" },
+  { icon: Monitor, label: "Servidores", path: "/servers" },
+  { icon: FileKey, label: "Credenciais", path: "/credentials" },
+  { icon: Link2, label: "Links Importantes", path: "/links" },
+  { icon: Cpu, label: "Agente / Túnel", path: "/agent" },
+  { icon: BarChart2, label: "Monitoramento", path: "/monitoring" },
+];
 
-// ─── Context helpers ──────────────────────────────────────────────────────────
-function makeCtx(role: "admin" | "user" = "admin"): TrpcContext {
-  return {
-    user: {
-      id: 1,
-      openId: "test-user",
-      name: "Test User",
-      email: "test@example.com",
-      loginMethod: "manus",
-      role,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      lastSignedIn: new Date(),
-    },
-    req: { protocol: "https", headers: {} } as TrpcContext["req"],
-    res: {
-      clearCookie: vi.fn(),
-    } as unknown as TrpcContext["res"],
-  };
+const adminMenu = [
+  { icon: Shield, label: "Permissões", path: "/permissions" },
+  { icon: Users, label: "Usuários", path: "/users" },
+  { icon: Activity, label: "Logs de Auditoria", path: "/logs" },
+];
+
+const SIDEBAR_WIDTH_KEY = "sidebar-width";
+const DEFAULT_WIDTH = 260;
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 380;
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    return saved ? parseInt(saved, 10) : DEFAULT_WIDTH;
+  });
+  const { loading, user } = useAuth();
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+  }, [sidebarWidth]);
+
+  if (loading) return <DashboardLayoutSkeleton />;
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="flex flex-col items-center gap-8 p-8 max-w-md w-full">
+          {/* Geometric accent */}
+          <div className="relative flex items-center justify-center w-24 h-24">
+            <div className="absolute w-24 h-24 rounded-full bg-[oklch(0.82_0.08_230/0.25)]" />
+            <div className="absolute w-16 h-16 rounded-full bg-[oklch(0.88_0.06_350/0.3)] translate-x-3 translate-y-2" />
+            <Monitor className="relative z-10 h-10 w-10 text-primary" />
+          </div>
+          <div className="flex flex-col items-center gap-3 text-center">
+            <h1 className="text-3xl font-bold tracking-tight">Remote Access</h1>
+            <p className="text-sm font-light text-muted-foreground max-w-xs leading-relaxed">
+              Gerenciamento centralizado de acessos remotos a servidores Windows Server.
+            </p>
+          </div>
+          <Button
+            onClick={() => { window.location.href = "/login"; }}
+            size="lg"
+            className="w-full shadow-lg hover:shadow-xl transition-all font-semibold"
+          >
+            Entrar no sistema
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SidebarProvider style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+      <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
+        {children}
+      </DashboardLayoutContent>
+    </SidebarProvider>
+  );
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+function DashboardLayoutContent({
+  children,
+  setSidebarWidth,
+}: {
+  children: React.ReactNode;
+  setSidebarWidth: (width: number) => void;
+}) {
+  const { user, logout } = useAuth();
+  const [location, setLocation] = useLocation();
+  const { state, toggleSidebar } = useSidebar();
+  const isCollapsed = state === "collapsed";
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
+  const isAdmin = user?.role === "admin";
 
-describe("auth.logout", () => {
-  it("clears session cookie and returns success", async () => {
-    const { ctx } = { ctx: makeCtx() };
-    const clearedCookies: string[] = [];
-    ctx.res.clearCookie = (name: string) => { clearedCookies.push(name); };
-    const caller = appRouter.createCaller(ctx);
-    const result = await caller.auth.logout();
-    expect(result.success).toBe(true);
-    expect(clearedCookies).toContain("app_session_id");
+  // Change password modal
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: "", newPw: "", confirm: "" });
+  const setPasswordMutation = trpc.users.setPassword.useMutation({
+    onSuccess: () => {
+      toast.success("Senha alterada com sucesso!");
+      setShowChangePassword(false);
+      setPwForm({ current: "", newPw: "", confirm: "" });
+    },
+    onError: (e) => toast.error(e.message),
   });
-});
-
-describe("dashboard.stats", () => {
-  it("returns stats for authenticated user", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const stats = await caller.dashboard.stats();
-    expect(stats.totalClients).toBe(5);
-    expect(stats.totalServers).toBe(10);
-    expect(stats.onlineServers).toBe(7);
-    expect(Array.isArray(stats.recentLogs)).toBe(true);
-  });
-});
-
-describe("clients router", () => {
-  it("lists clients", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.clients.list({});
-    expect(Array.isArray(result)).toBe(true);
-    expect(result[0]?.name).toBe("Empresa ABC");
-  });
-
-  it("creates a client as admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.clients.create({
-      name: "Nova Empresa",
-      status: "active",
+  const handleChangePassword = () => {
+    if (pwForm.newPw !== pwForm.confirm) { toast.error("As senhas não coincidem."); return; }
+    if (!user?.id) return;
+    setPasswordMutation.mutate({
+      userId: user.id,
+      newPassword: pwForm.newPw,
+      currentPassword: pwForm.current || undefined,
     });
-    expect(result.success).toBe(true);
-  });
+  };
 
-  it("blocks client creation for non-admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("user"));
-    await expect(
-      caller.clients.create({ name: "Empresa X", status: "active" })
-    ).rejects.toThrow();
-  });
+  const activeLabel = [...mainMenu, ...adminMenu].find((i) => i.path === location)?.label ?? "Menu";
 
-  it("updates a client as admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.clients.update({ id: 1, name: "Empresa Atualizada" });
-    expect(result.success).toBe(true);
-  });
+  useEffect(() => {
+    if (isCollapsed) setIsResizing(false);
+  }, [isCollapsed]);
 
-  it("deletes a client as admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.clients.delete({ id: 1 });
-    expect(result.success).toBe(true);
-  });
-});
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const sidebarLeft = sidebarRef.current?.getBoundingClientRect().left ?? 0;
+      const newWidth = e.clientX - sidebarLeft;
+      if (newWidth >= MIN_WIDTH && newWidth <= MAX_WIDTH) setSidebarWidth(newWidth);
+    };
+    const handleMouseUp = () => setIsResizing(false);
+    if (isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    }
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing, setSidebarWidth]);
 
-describe("servers router", () => {
-  it("lists servers", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.servers.list({});
-    expect(Array.isArray(result)).toBe(true);
-    expect(result[0]?.hostname).toBe("SRV-01");
-  });
+  return (
+    <>
+      <div className="relative" ref={sidebarRef}>
+        <Sidebar collapsible="icon" className="border-r border-border/60" disableTransition={isResizing}>
+          {/* Header */}
+          <SidebarHeader className="h-16 justify-center border-b border-border/60">
+            <div className="flex items-center gap-3 px-2 w-full">
+              <button
+                onClick={toggleSidebar}
+                className="h-8 w-8 flex items-center justify-center hover:bg-secondary rounded-lg transition-colors shrink-0"
+                aria-label="Toggle navigation"
+              >
+                <PanelLeft className="h-4 w-4 text-muted-foreground" />
+              </button>
+              {!isCollapsed && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center justify-center w-6 h-6 rounded bg-primary">
+                    <Wifi className="w-3.5 h-3.5 text-primary-foreground" />
+                  </div>
+                  <span className="font-bold tracking-tight text-sm truncate">RemoteManager</span>
+                </div>
+              )}
+            </div>
+          </SidebarHeader>
 
-  it("gets a server by id", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.servers.get({ id: 1 });
-    expect(result.hostname).toBe("SRV-01");
-    expect(result.ipAddress).toBe("192.168.1.10");
-  });
+          {/* Main Menu */}
+          <SidebarContent className="gap-0 py-3">
+            <SidebarGroup>
+              {!isCollapsed && (
+                <SidebarGroupLabel className="px-4 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-1">
+                  Principal
+                </SidebarGroupLabel>
+              )}
+              <SidebarMenu className="px-2">
+                {mainMenu.map((item) => {
+                  const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        onClick={() => setLocation(item.path)}
+                        tooltip={item.label}
+                        className="h-10 font-medium"
+                      >
+                        <item.icon className={`h-4 w-4 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
 
-  it("creates a server as admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.servers.create({
-      clientId: 1,
-      hostname: "SRV-02",
-      ipAddress: "192.168.1.20",
-      rdpPort: 3389,
-    });
-    expect(result.success).toBe(true);
-  });
+            {/* Admin Menu */}
+            {isAdmin && (
+              <SidebarGroup className="mt-2">
+                {!isCollapsed && (
+                  <SidebarGroupLabel className="px-4 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-1">
+                    Administração
+                  </SidebarGroupLabel>
+                )}
+                <SidebarMenu className="px-2">
+                  {adminMenu.map((item) => {
+                    const isActive = location === item.path || location.startsWith(item.path);
+                    return (
+                      <SidebarMenuItem key={item.path}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          onClick={() => setLocation(item.path)}
+                          tooltip={item.label}
+                          className="h-10 font-medium"
+                        >
+                          <item.icon className={`h-4 w-4 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+                          <span>{item.label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroup>
+            )}
+          </SidebarContent>
 
-  it("blocks server creation for non-admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("user"));
-    await expect(
-      caller.servers.create({ clientId: 1, hostname: "SRV-X", ipAddress: "10.0.0.1", rdpPort: 3389 })
-    ).rejects.toThrow();
-  });
+          {/* Footer */}
+          <SidebarFooter className="p-3 border-t border-border/60">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-secondary transition-colors w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Avatar className="h-8 w-8 border shrink-0 bg-[oklch(0.82_0.08_230/0.3)]">
+                    <AvatarFallback className="text-xs font-bold text-primary bg-transparent">
+                      {user?.name?.charAt(0).toUpperCase() ?? "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                  {!isCollapsed && (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate leading-none">{user?.name || "-"}</p>
+                      <p className="text-xs text-muted-foreground truncate mt-1">{user?.role === "admin" ? "Administrador" : "Usuário"}</p>
+                    </div>
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <div className="px-2 py-1.5">
+                  <p className="text-sm font-semibold">{user?.name}</p>
+                  <p className="text-xs text-muted-foreground">{user?.email}</p>
+                  <Badge variant="secondary" className="mt-1.5 text-[10px]">
+                    {user?.role === "admin" ? "Admin" : "Usuário"}
+                  </Badge>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setLocation("/settings")} className="cursor-pointer">
+                  <Settings className="mr-2 h-4 w-4" />
+                  Configurações
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowChangePassword(true)} className="cursor-pointer">
+                  <KeyRound className="mr-2 h-4 w-4" />
+                  Alterar Senha
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sair
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarFooter>
+        </Sidebar>
 
-  it("updates server status", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.servers.updateStatus({ id: 1, status: "online" });
-    expect(result.success).toBe(true);
-  });
-});
+        {/* Resize handle */}
+        <div
+          className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/20 transition-colors ${isCollapsed ? "hidden" : ""}`}
+          onMouseDown={() => { if (!isCollapsed) setIsResizing(true); }}
+          style={{ zIndex: 50 }}
+        />
+      </div>
 
-describe("credentials router", () => {
-  it("lists credentials for admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.credentials.listByServer({ serverId: 1 });
-    expect(Array.isArray(result)).toBe(true);
-    expect(result[0]?.label).toBe("Admin");
-    expect(result[0]?.passwordEncrypted).toBe("••••••••"); // masked
-  });
+      <SidebarInset>
+        {isMobile && (
+          <div className="flex border-b h-14 items-center justify-between bg-background/95 px-4 backdrop-blur sticky top-0 z-40">
+            <div className="flex items-center gap-3">
+              <SidebarTrigger className="h-9 w-9 rounded-lg" />
+              <span className="font-semibold text-sm">{activeLabel}</span>
+            </div>
+          </div>
+        )}
+        <main className="flex-1 p-6">{children}</main>
+      </SidebarInset>
 
-  it("blocks credential listing for user without permission", async () => {
-    const caller = appRouter.createCaller(makeCtx("user"));
-    await expect(
-      caller.credentials.listByServer({ serverId: 1 })
-    ).rejects.toThrow();
-  });
-
-  it("creates a credential as admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.credentials.create({
-      serverId: 1,
-      label: "Suporte",
-      username: "suporte",
-      password: "senha123",
-      isDefault: false,
-    });
-    expect(result.success).toBe(true);
-  });
-});
-
-describe("links router", () => {
-  it("lists links", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.links.list({});
-    expect(Array.isArray(result)).toBe(true);
-  });
-
-  it("creates a link as admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.links.create({
-      title: "Painel VPN",
-      url: "https://vpn.empresa.com",
-    });
-    expect(result.success).toBe(true);
-  });
-});
-
-describe("logs router", () => {
-  it("lists logs for admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.logs.list({ limit: 10 });
-    expect(Array.isArray(result)).toBe(true);
-  });
-});
-
-describe("users router", () => {
-  it("lists users for admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.users.list();
-    expect(Array.isArray(result)).toBe(true);
-  });
-
-  it("blocks user listing for non-admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("user"));
-    await expect(caller.users.list()).rejects.toThrow();
-  });
-});
-
-describe("rdp router", () => {
-  it("starts an RDP session as admin", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.rdp.startSession({ serverId: 1 });
-    expect(result.hostname).toBe("SRV-01");
-    expect(result.ipAddress).toBe("192.168.1.10");
-    expect(result.rdpPort).toBe(3389);
-    expect(typeof result.sessionToken).toBe("string");
-  });
-
-  it("ends an RDP session", async () => {
-    const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.rdp.endSession({ serverId: 1, duration: 120 });
-    expect(result.success).toBe(true);
-  });
-});
+      {/* Change Password Dialog */}
+      <Dialog open={showChangePassword} onOpenChange={setShowChangePassword}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Alterar Minha Senha</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Senha atual</Label>
+              <Input
+                type="password"
+                placeholder="Sua senha atual"
+                value={pwForm.current}
+                onChange={(e) => setPwForm((f) => ({ ...f, current: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Nova senha</Label>
+              <Input
+                type="password"
+                placeholder="Mínimo 6 caracteres"
+                value={pwForm.newPw}
+                onChange={(e) => setPwForm((f) => ({ ...f, newPw: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Confirmar nova senha</Label>
+              <Input
+                type="password"
+                placeholder="Repita a nova senha"
+                value={pwForm.confirm}
+                onChange={(e) => setPwForm((f) => ({ ...f, confirm: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowChangePassword(false)}>Cancelar</Button>
+            <Button onClick={handleChangePassword} disabled={setPasswordMutation.isPending}>
+              {setPasswordMutation.isPending ? "Salvando..." : "Salvar Senha"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

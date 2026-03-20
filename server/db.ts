@@ -357,3 +357,78 @@ export async function getOrCreateFrpToken(serverId: number): Promise<string> {
   await db.update(servers).set({ frpToken: token }).where(eq(servers.id, serverId));
   return token;
 }
+
+// ─── User Management (Local Users) ───────────────────────────────────────────
+export async function listUsers() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      loginMethod: users.loginMethod,
+      blocked: users.blocked,
+      createdAt: users.createdAt,
+      lastSignedIn: users.lastSignedIn,
+    })
+    .from(users)
+    .orderBy(desc(users.createdAt));
+}
+
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [user] = await db.select().from(users).where(eq(users.id, id));
+  return user ?? null;
+}
+
+export async function createLocalUser(data: {
+  name: string;
+  email: string;
+  passwordHash: string;
+  role?: "user" | "admin";
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const openId = `local_${crypto.randomBytes(16).toString("hex")}`;
+  const [user] = await db
+    .insert(users)
+    .values({
+      openId,
+      name: data.name,
+      email: data.email,
+      passwordHash: data.passwordHash,
+      loginMethod: "local",
+      role: data.role ?? "user",
+      blocked: false,
+    })
+    .returning();
+  return user;
+}
+
+export async function updateUserPasswordHash(userId: number, passwordHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db
+    .update(users)
+    .set({ passwordHash, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+export async function toggleUserBlocked(userId: number, blocked: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db
+    .update(users)
+    .set({ blocked, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+export async function deleteUser(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(serverPermissions).where(eq(serverPermissions.userId, userId));
+  await db.delete(users).where(eq(users.id, userId));
+}
