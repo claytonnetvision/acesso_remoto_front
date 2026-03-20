@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: remote-access-frps
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: FRP_TOKEN
+        generateValue: true   # Render gera um valor aleatório seguro
+      - key: FRP_DASHBOARD_USER
+        value: admin
+      - key: FRP_DASHBOARD_PASS
+        generateValue: true

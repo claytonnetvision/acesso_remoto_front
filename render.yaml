@@ -1,0 +1,52 @@
+services:
+  # ── Painel Web (Frontend + Backend API) ────────────────────────────────────────────────────
+  - type: web
+    name: remote-access-manager
+    runtime: node
+    plan: free
+    buildCommand: pnpm install --frozen-lockfile && pnpm build:render
+    startCommand: node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # ── Banco de Dados (Neon PostgreSQL) ──────────────────────────────────────────────────────────────────────────────
+      # Cole a string de conexão do Neon no Render (Environment Variables)
+      - key: NEON_DATABASE_URL
+        sync: false
+
+      # ── Autenticação JWT ──────────────────────────────────────────────────────────────────────────────────────────
+      - key: JWT_SECRET
+        generateValue: true
+
+      # ── App Identity ────────────────────────────────────────────────────────────────────────────────────────────────
+      - key: VITE_APP_ID
+        value: remote-access-manager
+      - key: VITE_APP_TITLE
+        value: Remote Access Manager
+      - key: OWNER_OPEN_ID
+        value: local
+      - key: OWNER_NAME
+        value: Admin
+      - key: OAUTH_SERVER_URL
+        value: https://api.manus.im
+      - key: VITE_OAUTH_PORTAL_URL
+        value: https://manus.im
+
+      # ── FRP Server (VPS Hostinger 31.97.16.12) ───────────────────────────────────────────────────────────────
+      - key: FRP_SERVER_ADDR
+        value: "31.97.16.12"
+      - key: FRP_SERVER_PORT
+        value: "7000"
+      - key: FRP_SERVER_PROTOCOL
+        value: tcp
+
+      # ── FRP Dashboard ─────────────────────────────────────────────────────────────────────────────────────────────
+      - key: FRP_DASHBOARD_ADDR
+        value: "31.97.16.12"
+      - key: FRP_DASHBOARD_PORT
+        value: "7500"
+      - key: FRP_DASHBOARD_USER
+        value: admin
+      - key: FRP_DASHBOARD_PASS
+        sync: false   # Preencher: AdminFrps@2024
