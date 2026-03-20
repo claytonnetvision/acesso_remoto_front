@@ -524,10 +524,13 @@ export const frpRouter = router({
       const legacyPort = 7001;
       const serverPort = isLegacy ? legacyPort : modernPort;
 
-      // Generate or retrieve the server's unique frp token (used for modern frps)
-      const token = await db.getOrCreateFrpToken(server.id);
-      // Legacy frps uses a shared token (frps-legacy v0.51.3 single token auth)
-      const legacyToken = "legacy_token_2024_RemoteManager";
+      // Use global frps token (all agents use the same token configured in frps.toml)
+      // The frps on VPS uses auth.method="token" with a single global token
+      // Per-server token auth via httpPlugin was removed due to mux stream EOF issues
+      const globalToken = process.env.FRP_TOKEN ?? "RemoteManager2024@frp";
+      const token = globalToken;
+      // Legacy frps uses the same global token approach
+      const legacyToken = process.env.FRP_LEGACY_TOKEN ?? "RemoteManager2024@frp";
 
       // Always generate both configs for reference
       const frpcToml = generateFrpcToml({
