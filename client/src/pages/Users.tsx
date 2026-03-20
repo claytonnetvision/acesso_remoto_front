@@ -1,149 +1,396 @@
-# Remote Access Manager - TODO
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+import {
+  UserPlus,
+  Lock,
+  Unlock,
+  Trash2,
+  KeyRound,
+  ShieldCheck,
+  User,
+} from "lucide-react";
 
-## Banco de Dados / Schema
-- [x] Tabela clients (clientes)
-- [x] Tabela servers (servidores Windows)
-- [x] Tabela credentials (credenciais de acesso)
-- [x] Tabela access_logs (logs de auditoria)
-- [x] Tabela server_permissions (permissões por usuário/servidor)
-- [x] Tabela important_links (links importantes por cliente)
+type UserRow = {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  loginMethod: string | null;
+  blocked: boolean;
+  createdAt: Date | null;
+  lastSignedIn: Date | null;
+};
 
-## Backend (tRPC Routers)
-- [x] Router: clients (CRUD completo)
-- [x] Router: servers (CRUD + status ping)
-- [x] Router: credentials (CRUD com criptografia AES-256)
-- [x] Router: accessLogs (listar, filtrar)
-- [x] Router: permissions (atribuir/revogar acesso)
-- [x] Router: dashboard (estatísticas gerais)
-- [x] Router: rdp (iniciar sessão RDP + download .rdp)
+export default function Users() {
+  const { user: currentUser } = useAuth();
+  const utils = trpc.useUtils();
 
-## Frontend - Tema e Layout
-- [x] Tema escandinavo (cinza frio, azul pastel, rosa blush)
-- [x] DashboardLayout com sidebar redimensionável
-- [x] Tipografia bold/thin hierárquica (DM Sans + Inter)
+  const { data: usersList, isLoading } = trpc.users.list.useQuery();
 
-## Frontend - Páginas
-- [x] Dashboard (visão geral, cards de stats, conexões recentes)
-- [x] Clientes (lista, busca, filtros, CRUD)
-- [x] Servidores (lista, status online/offline, CRUD)
-- [x] Credenciais (gerenciamento seguro, mascaramento, reveal)
-- [x] Conexão RDP (interface de acesso + download .rdp)
-- [x] Logs de Auditoria (tabela com filtros)
-- [x] Permissões (gerenciar acesso por usuário)
-- [x] Links Importantes (CRUD com categorias)
-- [x] Usuários (lista de usuários do sistema)
+  const createUser = trpc.users.create.useMutation({
+    onSuccess: () => {
+      toast.success("Usuário criado com sucesso!");
+      utils.users.list.invalidate();
+      setShowCreate(false);
+      setCreateForm({ name: "", email: "", password: "", role: "user" });
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
-## Funcionalidades Especiais
-- [x] Monitoramento de status dos servidores (manual)
-- [x] Busca global de clientes e servidores
-- [x] Controle de roles (admin/user) nas rotas
-- [x] Download de arquivo .rdp configurado
-- [x] Indicadores visuais de status (online/offline/manutenção)
-- [x] Sistema de permissões granular por servidor
-- [x] Criptografia AES-256 para senhas
+  const setPasswordMutation = trpc.users.setPassword.useMutation({
+    onSuccess: () => {
+      toast.success("Senha alterada com sucesso!");
+      setShowPassword(false);
+      setPasswordForm({ userId: 0, newPassword: "", confirmPassword: "" });
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
-## Testes
-- [x] Testes unitários dos routers principais (23 testes passando)
-- [x] Checkpoint final
+  const toggleBlock = trpc.users.toggleBlock.useMutation({
+    onSuccess: (_, vars) => {
+      toast.success(`Usuário ${vars.blocked ? "bloqueado" : "desbloqueado"} com sucesso!`);
+      utils.users.list.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
-## Deploy / Entrega
-- [ ] Push frontend para https://github.com/claytonnetvision/acesso_remoto_front.git
-- [ ] Push backend para https://github.com/claytonnetvision/acesso_remoto_back.git
+  const deleteUser = trpc.users.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Usuário excluído com sucesso!");
+      utils.users.list.invalidate();
+      setDeleteTarget(null);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
-## Arquitetura frp (Túnel Reverso estilo AnyDesk)
-- [x] Router frp: generateAgentConfig (token único por servidor)
-- [x] Router frp: checkTunnelStatus (via frps dashboard API)
-- [x] Router frp: checkAllTunnels (bulk update)
-- [x] Router frp: getRdpConnectionInfo (túnel vs direto)
-- [x] Geração de frpc.toml personalizado por servidor
-- [x] Script install.bat (instala como serviço Windows)
-- [x] Script uninstall.bat
-- [x] README.txt com instruções de instalação
-- [x] Página AgentSetup (download de config, instruções passo a passo)
-- [x] Página RdpSession atualizada (tabs Túnel / Direto)
-- [x] Dashboard com botão Verificar Túneis
-- [x] Botão Agente nos cards de servidor
-- [x] Visual AnyDesk (verde primário, sidebar escura, logo RemoteManager)
+  const [showCreate, setShowCreate] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
+  const [passwordTarget, setPasswordTarget] = useState<UserRow | null>(null);
 
-## Migração PostgreSQL (Neon)
-- [ ] Migrar drizzle/schema.ts de MySQL para PostgreSQL
-- [ ] Atualizar server/db.ts para usar postgres/neon driver
-- [ ] Atualizar drizzle.config.ts para PostgreSQL
-- [ ] Atualizar package.json (trocar mysql2 por postgres)
-- [ ] Aplicar schema no banco Neon
-- [ ] Gerar ZIP atualizado com Neon configurado
+  const [createForm, setCreateForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "user" as "user" | "admin",
+  });
 
-## Login Local (sem OAuth)
-- [x] Coluna passwordHash na tabela users
-- [x] Endpoint POST /api/auth/local-login
-- [x] Endpoint POST /api/auth/local-logout
-- [x] Tela de login com usuário/senha (/login)
-- [x] Usuário admin padrão (admin / admin123) — criado no Neon
-- [x] Seed script seed-admin.mjs para criar admin no Neon
+  const [passwordForm, setPasswordForm] = useState({
+    userId: 0,
+    newPassword: "",
+    confirmPassword: "",
+  });
 
-## Correções
-- [x] Corrigir install.bat — sintaxe do sc create para Windows (usar C:\RemoteAccessAgent sem espaços)
+  const handleOpenPassword = (u: UserRow) => {
+    setPasswordTarget(u);
+    setPasswordForm({ userId: u.id, newPassword: "", confirmPassword: "" });
+    setShowPassword(true);
+  };
 
-## Deploy Render (frp via WebSocket)
-- [x] Dockerfile para frps no Render (frps-render/Dockerfile)
-- [x] frps.toml com transport websocket (gerado pelo entrypoint.sh)
-- [x] frpc.toml gerado com transport wss (FRP_SERVER_PROTOCOL=wss)
-- [x] render.yaml para painel web + frps-render/render.yaml para frps
-- [x] Documentação de deploy no Render (frps-render/README.md)
+  const handleSetPassword = () => {
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error("As senhas não coincidem.");
+      return;
+    }
+    setPasswordMutation.mutate({
+      userId: passwordForm.userId,
+      newPassword: passwordForm.newPassword,
+    });
+  };
 
-## Migração VPS Hostinger (frps TCP)
-- [x] Instalar frps v0.61.1 na VPS Hostinger (31.97.16.12)
-- [x] Criar frps.toml com auth token, bindPort 7000, dashboard 7500, allowPorts 20000-29999
-- [x] Criar serviço systemd frps (auto-start)
-- [x] Configurar firewall ufw (portas 22, 7000, 7500, 20000-29999)
-- [x] Configurar variáveis de ambiente FRP_SERVER_ADDR, FRP_SERVER_PORT, FRP_SERVER_PROTOCOL
-- [x] Configurar FRP_DASHBOARD_ADDR, FRP_DASHBOARD_PORT, FRP_DASHBOARD_USER, FRP_DASHBOARD_PASS
-- [x] Configurar NEON_DATABASE_URL para banco PostgreSQL Neon
-- [x] Atualizar db.ts para usar NEON_DATABASE_URL em vez de DATABASE_URL (MySQL)
-- [x] Verificar geração de frpc.toml com novo endereço da VPS (31.97.16.12:7000)
-- [x] Verificar comunicação painel ↔ frps dashboard (frpsOnline: true)
-- [x] Testes unitários: frp.env.test.ts (8 testes) + neon.db.test.ts (4 testes)
+  const formatDate = (d: Date | null) =>
+    d ? new Date(d).toLocaleDateString("pt-BR") : "—";
 
-## Seleção de SO e compatibilidade de agente
+  if (currentUser?.role !== "admin") {
+    return (
+      <div className="p-8 text-center text-muted-foreground">
+        <ShieldCheck className="mx-auto mb-3 h-12 w-12 opacity-30" />
+        <p className="text-lg font-medium">Acesso restrito a administradores.</p>
+      </div>
+    );
+  }
 
-- [x] Adicionar campo osType no schema da tabela servers
-- [x] Migrar banco com nova coluna osType (enum: win2008r2, win2012r2, win2016plus, win7, win10, win11, other)
-- [x] Atualizar formulário de cadastro/edição de servidor com dropdown de SO
-- [x] Atualizar geração do pacote do agente para selecionar frpc correto conforme osType
-- [x] Suporte a: Windows 7/10/11, WS2008R2, WS2012R2, WS2016+
-- [x] install.bat separado por modo: Modern (frpc.toml, porta 7000) e Legacy (frpc.ini, porta 7001)
-- [x] AgentSetup.tsx atualizado com badge de OS, aviso Legacy, downloads corretos por modo
-- [x] 43 testes unitários passando (8 novos testes de classificação osType)
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Gerenciamento de Usuários</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Crie e gerencie usuários do sistema.
+          </p>
+        </div>
+        <Button onClick={() => setShowCreate(true)}>
+          <UserPlus className="mr-2 h-4 w-4" />
+          Novo Usuário
+        </Button>
+      </div>
 
-## Bugs corrigidos (2026-03-20)
+      <div className="rounded-lg border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nome</TableHead>
+              <TableHead>E-mail</TableHead>
+              <TableHead>Perfil</TableHead>
+              <TableHead>Método</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Criado em</TableHead>
+              <TableHead>Último acesso</TableHead>
+              <TableHead className="text-right">Ações</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  Carregando...
+                </TableCell>
+              </TableRow>
+            ) : !usersList?.length ? (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                  Nenhum usuário cadastrado.
+                </TableCell>
+              </TableRow>
+            ) : (
+              usersList.map((u) => (
+                <TableRow key={u.id} className={u.blocked ? "opacity-60" : ""}>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2">
+                      {u.role === "admin" ? (
+                        <ShieldCheck className="h-4 w-4 text-primary" />
+                      ) : (
+                        <User className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      {u.name}
+                      {u.id === currentUser?.id && (
+                        <Badge variant="outline" className="text-xs">Você</Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                  <TableCell>
+                    <Badge variant={u.role === "admin" ? "default" : "secondary"}>
+                      {u.role === "admin" ? "Admin" : "Usuário"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">
+                      {u.loginMethod === "local" ? "Local" : u.loginMethod ?? "OAuth"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {u.blocked ? (
+                      <Badge variant="destructive">Bloqueado</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-green-600 border-green-600">Ativo</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{formatDate(u.createdAt)}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{formatDate(u.lastSignedIn)}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      {u.loginMethod === "local" && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Alterar senha"
+                          onClick={() => handleOpenPassword(u as UserRow)}
+                        >
+                          <KeyRound className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {u.id !== currentUser?.id && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title={u.blocked ? "Desbloquear" : "Bloquear"}
+                          onClick={() => toggleBlock.mutate({ userId: u.id, blocked: !u.blocked })}
+                        >
+                          {u.blocked ? (
+                            <Unlock className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Lock className="h-4 w-4 text-yellow-500" />
+                          )}
+                        </Button>
+                      )}
+                      {u.id !== currentUser?.id && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Excluir usuário"
+                          onClick={() => setDeleteTarget(u as UserRow)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
-- [x] Rota /agent: agora mostra lista de servidores com contador de túneis ativos/fechados
-- [x] Erro ao deletar servidor: deleteServer agora remove registros relacionados (FK cascade manual)
-- [x] Contador de túneis ativos/fechados adicionado na página Agente/Túnel
+      {/* Create User Dialog */}
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Novo Usuário</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Nome completo</Label>
+              <Input
+                placeholder="Ex: João Silva"
+                value={createForm.name}
+                onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>E-mail</Label>
+              <Input
+                type="email"
+                placeholder="joao@empresa.com"
+                value={createForm.email}
+                onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Senha</Label>
+              <Input
+                type="password"
+                placeholder="Mínimo 6 caracteres"
+                value={createForm.password}
+                onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Perfil</Label>
+              <Select
+                value={createForm.role}
+                onValueChange={(v) => setCreateForm((f) => ({ ...f, role: v as "user" | "admin" }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">Usuário</SelectItem>
+                  <SelectItem value="admin">Administrador</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreate(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => createUser.mutate(createForm)}
+              disabled={createUser.isPending}
+            >
+              {createUser.isPending ? "Criando..." : "Criar Usuário"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-## Monitoramento de Métricas (CPU/RAM/Disco)
+      {/* Set Password Dialog */}
+      <Dialog open={showPassword} onOpenChange={setShowPassword}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Alterar Senha — {passwordTarget?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label>Nova senha</Label>
+              <Input
+                type="password"
+                placeholder="Mínimo 6 caracteres"
+                value={passwordForm.newPassword}
+                onChange={(e) => setPasswordForm((f) => ({ ...f, newPassword: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Confirmar nova senha</Label>
+              <Input
+                type="password"
+                placeholder="Repita a senha"
+                value={passwordForm.confirmPassword}
+                onChange={(e) => setPasswordForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPassword(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSetPassword} disabled={setPasswordMutation.isPending}>
+              {setPasswordMutation.isPending ? "Salvando..." : "Salvar Senha"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-- [x] Corrigir rota /settings (404)
-- [x] Criar metrics-agent.ps1 (HTTP server PowerShell retornando JSON com CPU/RAM/Disco/Uptime)
-- [x] Atualizar frpc.toml gerado para incluir proxy de métricas (porta 9182 → porta remota 21xxx)
-- [x] Atualizar install.bat para instalar metrics-agent como segundo serviço Windows
-- [x] Criar endpoint tRPC metrics.collect (coleta métricas via túnel FRP)
-- [x] Criar página /monitoring com dashboard de CPU/RAM/Disco por servidor
-- [x] Alertas visuais quando disco > 85%, CPU > 90%, RAM > 90%
-
-## Melhorias de Monitoramento (2026-03-20)
-
-- [x] Adicionar campo enableMetrics (boolean) na tabela servers
-- [x] Toggle de monitoramento no formulário de cadastro/edição de servidor
-- [x] Filtrar servidores sem enableMetrics na página de Monitoramento e no frpc.toml
-- [x] Exibir nome do cliente acima do hostname nos cards de monitoramento
-
-## Gerenciamento de Usuários Locais (2026-03-20)
-
-- [x] Adicionar campos blocked, passwordHash na tabela users
-- [x] Migrar banco Neon com novos campos (blocked, passwordHash)
-- [x] Helpers no db.ts: listUsers, createLocalUser, updateUserPasswordHash, toggleUserBlocked, deleteUser, getUserById
-- [x] Procedures tRPC: users.list, users.create, users.setPassword, users.toggleBlock, users.delete, users.me
-- [x] Página /users: listar, criar, bloquear/desbloquear, excluir, trocar senha (admin)
-- [x] Modal de troca de própria senha no dropdown do perfil (sidebar)
-- [x] Usuário admin atualizado no Neon com nome, email e senha padrão (admin/admin123)
+      {/* Delete Confirm */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir usuário?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir <strong>{deleteTarget?.name}</strong>? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteTarget && deleteUser.mutate({ userId: deleteTarget.id })}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
