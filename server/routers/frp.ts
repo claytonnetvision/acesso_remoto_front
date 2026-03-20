@@ -957,10 +957,14 @@ try {
         if (!hasPerm) throw new TRPCError({ code: "FORBIDDEN" });
       }
       const serverAddr = process.env.FRP_SERVER_ADDR ?? "31.97.16.12";
+      const metricsProxyPort = process.env.FRP_METRICS_PROXY_PORT ?? "7600";
       const metricsPort = allocateMetricsPort(server.id);
       try {
+        // Use nginx proxy on VPS (port 7600) which sets correct Host header
+        // Direct access to port 21000+ fails because PowerShell HttpListener
+        // requires Host: localhost, but Render sends Host: <ip>:<port>
         const response = await fetch(
-          `http://${serverAddr}:${metricsPort}/metrics`,
+          `http://${serverAddr}:${metricsProxyPort}/metrics/${metricsPort}`,
           { signal: AbortSignal.timeout(5000) }
         );
         if (!response.ok) return { available: false, serverId: server.id, metricsPort };
@@ -994,13 +998,13 @@ try {
         })();
 
     const serverAddr = process.env.FRP_SERVER_ADDR ?? "31.97.16.12";
-
+    const metricsProxyPort = process.env.FRP_METRICS_PROXY_PORT ?? "7600";
     const results = await Promise.all(
       servers.map(async (server) => {
         const metricsPort = allocateMetricsPort(server.id);
         try {
           const response = await fetch(
-            `http://${serverAddr}:${metricsPort}/metrics`,
+            `http://${serverAddr}:${metricsProxyPort}/metrics/${metricsPort}`,
             { signal: AbortSignal.timeout(4000) }
           );
           if (!response.ok) return { serverId: server.id, hostname: server.hostname, available: false, metricsPort };
