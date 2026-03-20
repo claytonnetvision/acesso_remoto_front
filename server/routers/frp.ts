@@ -398,10 +398,12 @@ export const frpRouter = router({
       });
 
       // Legacy INI format for frpc v0.51.x (Windows Server 2008 R2 / 2012 R2)
+      // Uses port 7001 (frps-legacy v0.51.3) and a shared legacy token
+      const legacyToken = "legacy_token_2024_RemoteManager";
       const frpcIni = generateFrpcIni({
         serverAddr,
-        serverPort,
-        token,
+        serverPort: 7001,
+        token: legacyToken,
         serverName: server.hostname,
         serverId: server.id,
         rdpLocalPort: server.rdpPort,
