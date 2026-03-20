@@ -125,8 +125,9 @@ set SERVICE_NAME=RemoteAccessAgent
 set SERVICE_DIR=C:\\RemoteAccessAgent
 set FRPC_EXE=C:\\RemoteAccessAgent\\frpc.exe
 set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.toml
-set NSSM_EXE=C:\\RemoteAccessAgent\\nssm.exe
-set NSSM_URL=http://31.97.16.12/nssm.exe
+set WINSW_EXE=C:\\RemoteAccessAgent\\winsw.exe
+set WINSW_XML=C:\\RemoteAccessAgent\\winsw.xml
+set WINSW_URL=http://31.97.16.12/winsw.exe
 set FRPC_LEGACY_URL=http://31.97.16.12/frpc-legacy.exe
 
 echo.
@@ -191,54 +192,57 @@ if "%WIN_MAJOR%" == "10" (
     echo  Legacy INI config copied.
 )
 
-:: Download NSSM if not present
-echo [4/7] Checking NSSM service manager...
-if exist "%~dp0nssm.exe" (
-    echo  Found nssm.exe in package, copying...
-    copy /Y "%~dp0nssm.exe" "%NSSM_EXE%" >nul
-) else if not exist "%NSSM_EXE%" (
-    echo  Downloading NSSM from management server...
-    certutil -urlcache -split -f "%NSSM_URL%" "%NSSM_EXE%" >nul 2>&1
-    if not exist "%NSSM_EXE%" (
-        echo [ERROR] Failed to download NSSM. Check internet connection.
-        echo  Try manually: certutil -urlcache -split -f %NSSM_URL% %NSSM_EXE%
+:: Download WinSW if not present (service wrapper compatible with WS2008 R2+)
+echo [4/7] Checking WinSW service wrapper...
+if not exist "%WINSW_EXE%" (
+    echo  Downloading WinSW from management server...
+    certutil -urlcache -split -f "%WINSW_URL%" "%WINSW_EXE%" >nul 2>&1
+    if not exist "%WINSW_EXE%" (
+        echo [ERROR] Failed to download WinSW. Check internet connection.
         pause
         exit /b 1
     )
-    echo  NSSM downloaded successfully.
+    echo  WinSW downloaded successfully.
 )
 
+:: Generate WinSW XML config
+echo [5/7] Creating service configuration...
+echo ^<?xml version="1.0" encoding="UTF-8"?^> > "%WINSW_XML%"
+echo ^<service^> >> "%WINSW_XML%"
+echo   ^<id^>RemoteAccessAgent^</id^> >> "%WINSW_XML%"
+echo   ^<name^>Remote Access Manager Agent^</name^> >> "%WINSW_XML%"
+echo   ^<description^>Maintains secure tunnel to Remote Access Manager server^</description^> >> "%WINSW_XML%"
+echo   ^<executable^>!FRPC_EXE!^</executable^> >> "%WINSW_XML%"
+echo   ^<arguments^>-c !FRPC_CFG!^</arguments^> >> "%WINSW_XML%"
+echo   ^<log mode="roll"^>^</log^> >> "%WINSW_XML%"
+echo   ^<onfailure action="restart" delay="5 sec"/^> >> "%WINSW_XML%"
+echo   ^<onfailure action="restart" delay="10 sec"/^> >> "%WINSW_XML%"
+echo   ^<onfailure action="restart" delay="30 sec"/^> >> "%WINSW_XML%"
+echo ^</service^> >> "%WINSW_XML%"
+
 :: Remove existing service if present
-echo [5/7] Removing previous service (if any)...
 sc query "%SERVICE_NAME%" >nul 2>&1
 if %errorLevel% equ 0 (
-    "%NSSM_EXE%" stop "%SERVICE_NAME%" >nul 2>&1
+    "%WINSW_EXE%" stop "%WINSW_XML%" >nul 2>&1
     timeout /t 3 /nobreak >nul
-    "%NSSM_EXE%" remove "%SERVICE_NAME%" confirm >nul 2>&1
+    "%WINSW_EXE%" uninstall "%WINSW_XML%" >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
 
-:: Install as Windows Service using NSSM
-echo [6/7] Installing Windows Service (NSSM)...
+:: Install as Windows Service using WinSW
+echo [6/7] Installing Windows Service (WinSW)...
 echo  Using config: !FRPC_CFG!
-"%NSSM_EXE%" install "%SERVICE_NAME%" "%FRPC_EXE%" "-c !FRPC_CFG!"
+"%WINSW_EXE%" install "%WINSW_XML%"
 if %errorLevel% neq 0 (
-    echo [ERROR] Failed to create service!
+    echo [ERROR] Failed to install service!
     echo Make sure you are running as Administrator.
     pause
     exit /b 1
 )
 
-"%NSSM_EXE%" set "%SERVICE_NAME%" DisplayName "Remote Access Manager Agent" >nul
-"%NSSM_EXE%" set "%SERVICE_NAME%" Description "Maintains secure tunnel to Remote Access Manager server" >nul
-"%NSSM_EXE%" set "%SERVICE_NAME%" Start SERVICE_AUTO_START >nul
-"%NSSM_EXE%" set "%SERVICE_NAME%" AppRestartDelay 5000 >nul
-"%NSSM_EXE%" set "%SERVICE_NAME%" AppStdout "%SERVICE_DIR%\\frpc.log" >nul
-"%NSSM_EXE%" set "%SERVICE_NAME%" AppStderr "%SERVICE_DIR%\\frpc-error.log" >nul
-
 :: Start service
 echo [7/7] Starting service...
-"%NSSM_EXE%" start "%SERVICE_NAME%"
+"%WINSW_EXE%" start "%WINSW_XML%"
 
 timeout /t 5 /nobreak >nul
 
