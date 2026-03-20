@@ -71,6 +71,7 @@ export default function AgentSetup() {
 
   const [agentConfig, setAgentConfig] = useState<{
     frpcToml: string;
+    frpcIni: string;
     installBat: string;
     uninstallBat: string;
     readme: string;
@@ -106,10 +107,11 @@ export default function AgentSetup() {
   const handleDownloadAll = () => {
     if (!agentConfig) return;
     handleDownloadFile(agentConfig.frpcToml, "frpc.toml");
-    setTimeout(() => handleDownloadFile(agentConfig.installBat, "install.bat"), 200);
-    setTimeout(() => handleDownloadFile(agentConfig.uninstallBat, "uninstall.bat"), 400);
-    setTimeout(() => handleDownloadFile(agentConfig.readme, "README.txt"), 600);
-    toast.info("Baixando 4 arquivos...");
+    setTimeout(() => handleDownloadFile(agentConfig.frpcIni, "frpc.ini"), 200);
+    setTimeout(() => handleDownloadFile(agentConfig.installBat, "install.bat"), 400);
+    setTimeout(() => handleDownloadFile(agentConfig.uninstallBat, "uninstall.bat"), 600);
+    setTimeout(() => handleDownloadFile(agentConfig.readme, "README.txt"), 800);
+    toast.info("Baixando 5 arquivos (frpc.toml + frpc.ini + scripts)...");
   };
 
   if (serverLoading) {

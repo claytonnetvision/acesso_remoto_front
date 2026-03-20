@@ -74,6 +74,39 @@ remotePort = ${opts.rdpRemotePort}
 `;
 }
 
+function generateFrpcIni(opts: {
+  serverAddr: string;
+  serverPort: number;
+  token: string;
+  serverName: string;
+  serverId: number;
+  rdpLocalPort: number;
+  rdpRemotePort: number;
+}): string {
+  // INI format for frpc v0.51.x (compatible with Windows Server 2008 R2 / 2012 R2)
+  const proxyName = `rdp-${opts.serverId}-${opts.serverName.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`;
+  return `; frpc.ini — Remote Access Manager Agent (Legacy Format)
+; Server: ${opts.serverName} (ID: ${opts.serverId})
+; Generated automatically — do not edit manually
+; Compatible with frpc v0.51.x (Windows Server 2008 R2 / 2012 R2)
+
+[common]
+server_addr = ${opts.serverAddr}
+server_port = ${opts.serverPort}
+token = ${opts.token}
+log_level = info
+log_max_days = 3
+heartbeat_interval = 30
+heartbeat_timeout = 90
+
+[${proxyName}]
+type = tcp
+local_ip = 127.0.0.1
+local_port = ${opts.rdpLocalPort}
+remote_port = ${opts.rdpRemotePort}
+`;
+}
+
 function generateInstallBat(opts: {
   serverName: string;
   serverId: number;
@@ -125,7 +158,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: Detect Windows version and use correct frpc binary
+:: Detect Windows version and use correct frpc binary + config
 echo [3/7] Detecting Windows version...
 for /f "tokens=4-5 delims=[.] " %%i in ('ver') do set VERSION=%%i.%%j
 set WIN_MAJOR=0
@@ -136,14 +169,16 @@ for /f "tokens=1 delims=." %%i in ("%VERSION%") do set WIN_MAJOR=%%i
 :: Windows 6.3 = Server 2012 R2 / Win8.1
 :: Windows 10.0 = Server 2016+ / Win10+
 if "%WIN_MAJOR%" == "10" (
-    echo  Windows 10/Server 2016+ detected - using modern frpc...
+    echo  Windows 10/Server 2016+ detected - using modern frpc with TOML config...
     copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
     if not exist "%FRPC_EXE%" (
         echo  frpc.exe not in package, downloading modern version...
         certutil -urlcache -split -f "http://31.97.16.12/frpc.exe" "%FRPC_EXE%" >nul 2>&1
     )
+    set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.toml
+    copy /Y "%~dp0frpc.toml" "%FRPC_CFG%" >nul 2>&1
 ) else (
-    echo  Windows Server 2008 R2 / 2012 R2 detected - using legacy frpc v0.51.3...
+    echo  Windows Server 2008 R2 / 2012 R2 detected - using legacy frpc v0.51.3 with INI config...
     certutil -urlcache -split -f "%FRPC_LEGACY_URL%" "%FRPC_EXE%" >nul 2>&1
     if not exist "%FRPC_EXE%" (
         echo [ERROR] Failed to download legacy frpc. Check internet connection.
@@ -152,6 +187,14 @@ if "%WIN_MAJOR%" == "10" (
         exit /b 1
     )
     echo  Legacy frpc downloaded successfully.
+    set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.ini
+    copy /Y "%~dp0frpc.ini" "%FRPC_CFG%" >nul 2>&1
+    if not exist "%FRPC_CFG%" (
+        echo [ERROR] frpc.ini not found in package!
+        pause
+        exit /b 1
+    )
+    echo  Legacy INI config copied.
 )
 
 :: Download NSSM if not present
@@ -355,6 +398,17 @@ export const frpRouter = router({
         rdpRemotePort,
       });
 
+      // Legacy INI format for frpc v0.51.x (Windows Server 2008 R2 / 2012 R2)
+      const frpcIni = generateFrpcIni({
+        serverAddr,
+        serverPort,
+        token,
+        serverName: server.hostname,
+        serverId: server.id,
+        rdpLocalPort: server.rdpPort,
+        rdpRemotePort,
+      });
+
       const installBat = generateInstallBat({
         serverName: server.hostname,
         serverId: server.id,
@@ -387,6 +441,7 @@ export const frpRouter = router({
         serverAddr,
         serverPort,
         frpcToml,
+        frpcIni,
         installBat,
         uninstallBat,
         readme,
