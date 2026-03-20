@@ -166,6 +166,7 @@ set METRICS_PS1=C:\\RemoteAccessAgent\\metrics-agent.ps1
 set METRICS_XML=C:\\RemoteAccessAgent\\metrics-winsw.xml
 set WINSW_EXE=C:\\RemoteAccessAgent\\winsw.exe
 set WINSW_XML=C:\\RemoteAccessAgent\\winsw.xml
+set METRICS_WINSW_EXE=C:\\RemoteAccessAgent\\metrics-winsw.exe
 set WINSW_URL=http://31.97.16.12/winsw.exe
 set METRICS_PS1_URL=http://31.97.16.12/metrics-agent.ps1
 
@@ -256,7 +257,10 @@ echo   ^<onfailure action="restart" delay="30 sec"/^> >> "%WINSW_XML%"
 echo ^</service^> >> "%WINSW_XML%"
 
 :: Generate WinSW XML config for metrics agent
+:: IMPORTANT: WinSW uses XML with same name as the executable.
+:: We copy winsw.exe -> metrics-winsw.exe and create metrics-winsw.xml
 if exist "%METRICS_PS1%" (
+    copy /Y "%WINSW_EXE%" "%METRICS_WINSW_EXE%" >nul 2>&1
     echo ^<?xml version="1.0" encoding="UTF-8"?^> > "%METRICS_XML%"
     echo ^<service^> >> "%METRICS_XML%"
     echo   ^<id^>RemoteAccessMetrics^</id^> >> "%METRICS_XML%"
@@ -282,10 +286,16 @@ if %errorLevel% equ 0 (
 sc query "%METRICS_SERVICE_NAME%" >nul 2>&1
 if %errorLevel% equ 0 (
     echo  Removing existing metrics service...
-    "%WINSW_EXE%" stop "%METRICS_XML%" >nul 2>&1
-    timeout /t 2 /nobreak >nul
-    "%WINSW_EXE%" uninstall "%METRICS_XML%" >nul 2>&1
-    timeout /t 2 /nobreak >nul
+    if exist "%METRICS_WINSW_EXE%" (
+        "%METRICS_WINSW_EXE%" stop >nul 2>&1
+        timeout /t 2 /nobreak >nul
+        "%METRICS_WINSW_EXE%" uninstall >nul 2>&1
+        timeout /t 2 /nobreak >nul
+    ) else (
+        sc stop "%METRICS_SERVICE_NAME%" >nul 2>&1
+        sc delete "%METRICS_SERVICE_NAME%" >nul 2>&1
+        timeout /t 2 /nobreak >nul
+    )
 )
 
 :: Install and start tunnel service
@@ -301,13 +311,14 @@ if %errorLevel% neq 0 (
 :: Install and start metrics service
 echo [8/8] Installing metrics Windows Service...
 if exist "%METRICS_PS1%" (
+    if not exist "%METRICS_WINSW_EXE%" copy /Y "%WINSW_EXE%" "%METRICS_WINSW_EXE%" >nul 2>&1
     echo  Installing RemoteAccessMetrics service...
-    "%WINSW_EXE%" install "%METRICS_XML%"
+    "%METRICS_WINSW_EXE%" install
     if %errorLevel% neq 0 (
         echo  [WARNING] Metrics service install failed - check WinSW output above.
     ) else (
         echo  Starting RemoteAccessMetrics service...
-        "%WINSW_EXE%" start "%METRICS_XML%"
+        "%METRICS_WINSW_EXE%" start
         timeout /t 3 /nobreak >nul
         sc query "%METRICS_SERVICE_NAME%" | find "RUNNING" >nul
         if %errorLevel% equ 0 (
@@ -684,6 +695,112 @@ export const frpRouter = router({
         details: `Pacote de agente gerado para: ${server.hostname} (${isLegacy ? "legacy" : "modern"})`,
       });
 
+      // Embed the metrics-agent.ps1 content directly in the package
+      const metricsAgentPs1 = `# ==============================================================================
+# Remote Access Manager - Metrics Agent
+# Exposes system metrics (CPU, RAM, Disk) via HTTP on port 9182
+# Compatible with Windows Server 2008 R2+ and Windows 7+
+# Runs as a Windows Service via WinSW
+# ==============================================================================
+
+$Port = 9182
+$Prefix = "http://localhost:$Port/"
+
+function Get-Metrics {
+    try {
+        # CPU usage (average over 1 second)
+        $cpuLoad = (Get-WmiObject -Class Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+        if ($null -eq $cpuLoad) { $cpuLoad = 0 }
+
+        # RAM
+        $os = Get-WmiObject -Class Win32_OperatingSystem
+        $totalRam = [math]::Round($os.TotalVisibleMemorySize / 1024, 0)  # MB
+        $freeRam  = [math]::Round($os.FreePhysicalMemory / 1024, 0)      # MB
+        $usedRam  = $totalRam - $freeRam
+        $ramPct   = if ($totalRam -gt 0) { [math]::Round(($usedRam / $totalRam) * 100, 1) } else { 0 }
+
+        # Disk drives
+        $disks = @()
+        Get-WmiObject -Class Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
+            $totalGB = [math]::Round($_.Size / 1GB, 1)
+            $freeGB  = [math]::Round($_.FreeSpace / 1GB, 1)
+            $usedGB  = [math]::Round($totalGB - $freeGB, 1)
+            $pct     = if ($totalGB -gt 0) { [math]::Round(($usedGB / $totalGB) * 100, 1) } else { 0 }
+            $disks  += @{
+                drive   = $_.DeviceID
+                totalGB = $totalGB
+                freeGB  = $freeGB
+                usedGB  = $usedGB
+                pct     = $pct
+            }
+        }
+
+        # Uptime
+        $lastBoot  = $os.ConvertToDateTime($os.LastBootUpTime)
+        $uptime    = (Get-Date) - $lastBoot
+        $uptimeStr = "{0}d {1}h {2}m" -f [int]$uptime.TotalDays, $uptime.Hours, $uptime.Minutes
+
+        # OS info
+        $osName = $os.Caption
+
+        # Build JSON manually (compatible with PS 2.0 - no ConvertTo-Json)
+        $diskJson = ""
+        foreach ($d in $disks) {
+            if ($diskJson -ne "") { $diskJson += "," }
+            $diskJson += '{"drive":"' + $d.drive + '","totalGB":' + $d.totalGB + ',"freeGB":' + $d.freeGB + ',"usedGB":' + $d.usedGB + ',"pct":' + $d.pct + '}'
+        }
+
+        $json = '{"cpu":' + [int]$cpuLoad + ',"ram":{"totalMB":' + $totalRam + ',"usedMB":' + $usedRam + ',"freeMB":' + $freeRam + ',"pct":' + $ramPct + '},"disks":[' + $diskJson + '],"uptime":"' + $uptimeStr + '","os":"' + $osName.Replace('"','') + '","timestamp":' + [int64](Get-Date -UFormat %s) + '}'
+        return $json
+    } catch {
+        return '{"error":"' + $_.Exception.Message.Replace('"','') + '"}'
+    }
+}
+
+# Start HTTP listener
+$listener = New-Object System.Net.HttpListener
+$listener.Prefixes.Add($Prefix)
+
+try {
+    $listener.Start()
+    Write-Host "Remote Access Metrics Agent listening on $Prefix"
+    Write-Host "Press Ctrl+C to stop."
+
+    while ($listener.IsListening) {
+        try {
+            $context  = $listener.GetContext()
+            $request  = $context.Request
+            $response = $context.Response
+
+            if ($request.Url.AbsolutePath -eq "/metrics" -or $request.Url.AbsolutePath -eq "/") {
+                $body   = Get-Metrics
+                $bytes  = [System.Text.Encoding]::UTF8.GetBytes($body)
+                $response.ContentType     = "application/json; charset=utf-8"
+                $response.ContentLength64 = $bytes.Length
+                $response.Headers.Add("Access-Control-Allow-Origin", "*")
+                $response.StatusCode      = 200
+                $response.OutputStream.Write($bytes, 0, $bytes.Length)
+            } elseif ($request.Url.AbsolutePath -eq "/health") {
+                $body  = '{"status":"ok"}'
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+                $response.ContentType     = "application/json"
+                $response.ContentLength64 = $bytes.Length
+                $response.StatusCode      = 200
+                $response.OutputStream.Write($bytes, 0, $bytes.Length)
+            } else {
+                $response.StatusCode = 404
+            }
+
+            $response.OutputStream.Close()
+        } catch {
+            # Ignore individual request errors, keep running
+        }
+    }
+} finally {
+    $listener.Stop()
+}
+`;
+
       return {
         serverId: server.id,
         hostname: server.hostname,
@@ -697,6 +814,7 @@ export const frpRouter = router({
         installBat,
         uninstallBat,
         readme,
+        metricsAgentPs1,
         frpcDownloadUrl: isLegacy
           ? "http://31.97.16.12/frpc-legacy.exe"
           : "http://31.97.16.12/frpc.exe",
