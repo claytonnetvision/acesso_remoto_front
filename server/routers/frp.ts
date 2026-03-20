@@ -82,7 +82,7 @@ function generateInstallBat(opts: {
 :: ============================================================
 :: Remote Access Manager - Agent Installer
 :: Server: ${opts.serverName} (ID: ${opts.serverId})
-:: Compatible with Windows Server 2012 R2 and later
+:: Compatible with Windows Server 2008 R2 and later (32/64-bit)
 :: ============================================================
 :: Run this script as Administrator!
 
@@ -94,6 +94,7 @@ set FRPC_EXE=C:\\RemoteAccessAgent\\frpc.exe
 set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.toml
 set NSSM_EXE=C:\\RemoteAccessAgent\\nssm.exe
 set NSSM_URL=http://31.97.16.12/nssm.exe
+set FRPC_LEGACY_URL=http://31.97.16.12/frpc-legacy.exe
 
 echo.
 echo  ============================================================
@@ -112,17 +113,11 @@ if %errorLevel% neq 0 (
 )
 
 :: Create directory
-echo [1/6] Creating installation directory...
+echo [1/7] Creating installation directory...
 if not exist "%SERVICE_DIR%" mkdir "%SERVICE_DIR%"
 
-:: Copy files
-echo [2/6] Copying agent files...
-copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul
-if errorlevel 1 (
-    echo [ERROR] frpc.exe not found in this folder!
-    pause
-    exit /b 1
-)
+:: Copy frpc.toml
+echo [2/7] Copying configuration...
 copy /Y "%~dp0frpc.toml" "%FRPC_CFG%" >nul
 if errorlevel 1 (
     echo [ERROR] frpc.toml not found in this folder!
@@ -130,8 +125,37 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: Download NSSM if not present (service manager compatible with WS2012 R2)
-echo [3/6] Checking NSSM service manager...
+:: Detect Windows version and use correct frpc binary
+echo [3/7] Detecting Windows version...
+for /f "tokens=4-5 delims=[.] " %%i in ('ver') do set VERSION=%%i.%%j
+set WIN_MAJOR=0
+for /f "tokens=1 delims=." %%i in ("%VERSION%") do set WIN_MAJOR=%%i
+
+:: Windows 6.1 = Server 2008 R2 / Win7
+:: Windows 6.2 = Server 2012 / Win8
+:: Windows 6.3 = Server 2012 R2 / Win8.1
+:: Windows 10.0 = Server 2016+ / Win10+
+if "%WIN_MAJOR%" == "10" (
+    echo  Windows 10/Server 2016+ detected - using modern frpc...
+    copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
+    if not exist "%FRPC_EXE%" (
+        echo  frpc.exe not in package, downloading modern version...
+        certutil -urlcache -split -f "http://31.97.16.12/frpc.exe" "%FRPC_EXE%" >nul 2>&1
+    )
+) else (
+    echo  Windows Server 2008 R2 / 2012 R2 detected - using legacy frpc v0.51.3...
+    certutil -urlcache -split -f "%FRPC_LEGACY_URL%" "%FRPC_EXE%" >nul 2>&1
+    if not exist "%FRPC_EXE%" (
+        echo [ERROR] Failed to download legacy frpc. Check internet connection.
+        echo  Try manually: certutil -urlcache -split -f %FRPC_LEGACY_URL% %FRPC_EXE%
+        pause
+        exit /b 1
+    )
+    echo  Legacy frpc downloaded successfully.
+)
+
+:: Download NSSM if not present
+echo [4/7] Checking NSSM service manager...
 if exist "%~dp0nssm.exe" (
     echo  Found nssm.exe in package, copying...
     copy /Y "%~dp0nssm.exe" "%NSSM_EXE%" >nul
@@ -148,7 +172,7 @@ if exist "%~dp0nssm.exe" (
 )
 
 :: Remove existing service if present
-echo [4/6] Removing previous service (if any)...
+echo [5/7] Removing previous service (if any)...
 sc query "%SERVICE_NAME%" >nul 2>&1
 if %errorLevel% equ 0 (
     "%NSSM_EXE%" stop "%SERVICE_NAME%" >nul 2>&1
@@ -158,7 +182,7 @@ if %errorLevel% equ 0 (
 )
 
 :: Install as Windows Service using NSSM
-echo [5/6] Installing Windows Service (NSSM)...
+echo [6/7] Installing Windows Service (NSSM)...
 "%NSSM_EXE%" install "%SERVICE_NAME%" "%FRPC_EXE%" "-c %FRPC_CFG%"
 if %errorLevel% neq 0 (
     echo [ERROR] Failed to create service!
@@ -175,7 +199,7 @@ if %errorLevel% neq 0 (
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppStderr "%SERVICE_DIR%\\frpc-error.log" >nul
 
 :: Start service
-echo [6/6] Starting service...
+echo [7/7] Starting service...
 "%NSSM_EXE%" start "%SERVICE_NAME%"
 
 timeout /t 5 /nobreak >nul
