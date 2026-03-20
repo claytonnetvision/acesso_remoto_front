@@ -301,11 +301,25 @@ if %errorLevel% neq 0 (
 :: Install and start metrics service
 echo [8/8] Installing metrics Windows Service...
 if exist "%METRICS_PS1%" (
-    "%WINSW_EXE%" install "%METRICS_XML%" >nul 2>&1
-    "%WINSW_EXE%" start "%METRICS_XML%" >nul 2>&1
-    echo  Metrics agent installed.
+    echo  Installing RemoteAccessMetrics service...
+    "%WINSW_EXE%" install "%METRICS_XML%"
+    if %errorLevel% neq 0 (
+        echo  [WARNING] Metrics service install failed - check WinSW output above.
+    ) else (
+        echo  Starting RemoteAccessMetrics service...
+        "%WINSW_EXE%" start "%METRICS_XML%"
+        timeout /t 3 /nobreak >nul
+        sc query "%METRICS_SERVICE_NAME%" | find "RUNNING" >nul
+        if %errorLevel% equ 0 (
+            echo  [OK] Metrics agent running on port 9182!
+        ) else (
+            echo  [WARNING] Metrics service may not have started.
+            echo  Check log: %SERVICE_DIR%\RemoteAccessMetrics.out.log
+        )
+    )
 ) else (
-    echo  Metrics agent skipped (script not available).
+    echo  [WARNING] metrics-agent.ps1 not found - monitoring disabled.
+    echo  Expected at: %METRICS_PS1%
 )
 
 timeout /t 5 /nobreak >nul
@@ -323,10 +337,16 @@ if %errorLevel% equ 0 (
     echo.
 )
 
-echo  Installation folder: %SERVICE_DIR%
-echo  Services: RemoteAccessAgent (tunnel) + RemoteAccessMetrics (monitoring)
-echo  To uninstall: run uninstall.bat as Administrator
+echo  ============================================================
+echo   Installation Summary
+echo  ============================================================
+echo  Folder : %SERVICE_DIR%
+echo  Tunnel : RemoteAccessAgent (frpc tunnel)
+echo  Metrics: RemoteAccessMetrics (port 9182 - CPU/RAM/Disk)
+echo  Logs   : %SERVICE_DIR%\*.out.log
+echo  Uninstall: run uninstall.bat as Administrator
 echo.
+echo  Press any key to close...
 pause
 `;
 }
