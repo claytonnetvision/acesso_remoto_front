@@ -119,7 +119,7 @@ function generateInstallBat(opts: {
 :: ============================================================
 :: Run this script as Administrator!
 
-setlocal
+setlocal enabledelayedexpansion
 
 set SERVICE_NAME=RemoteAccessAgent
 set SERVICE_DIR=C:\\RemoteAccessAgent
@@ -149,14 +149,9 @@ if %errorLevel% neq 0 (
 echo [1/7] Creating installation directory...
 if not exist "%SERVICE_DIR%" mkdir "%SERVICE_DIR%"
 
-:: Copy frpc.toml
+:: Copy frpc.toml (will be overridden for legacy OS)
 echo [2/7] Copying configuration...
-copy /Y "%~dp0frpc.toml" "%FRPC_CFG%" >nul
-if errorlevel 1 (
-    echo [ERROR] frpc.toml not found in this folder!
-    pause
-    exit /b 1
-)
+copy /Y "%~dp0frpc.toml" "%FRPC_CFG%" >nul 2>&1
 
 :: Detect Windows version and use correct frpc binary + config
 echo [3/7] Detecting Windows version...
@@ -171,25 +166,24 @@ for /f "tokens=1 delims=." %%i in ("%VERSION%") do set WIN_MAJOR=%%i
 if "%WIN_MAJOR%" == "10" (
     echo  Windows 10/Server 2016+ detected - using modern frpc with TOML config...
     copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
-    if not exist "%FRPC_EXE%" (
+    if not exist "!FRPC_EXE!" (
         echo  frpc.exe not in package, downloading modern version...
-        certutil -urlcache -split -f "http://31.97.16.12/frpc.exe" "%FRPC_EXE%" >nul 2>&1
+        certutil -urlcache -split -f "http://31.97.16.12/frpc.exe" "!FRPC_EXE!" >nul 2>&1
     )
     set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.toml
-    copy /Y "%~dp0frpc.toml" "%FRPC_CFG%" >nul 2>&1
+    copy /Y "%~dp0frpc.toml" "!FRPC_CFG!" >nul 2>&1
 ) else (
     echo  Windows Server 2008 R2 / 2012 R2 detected - using legacy frpc v0.51.3 with INI config...
-    certutil -urlcache -split -f "%FRPC_LEGACY_URL%" "%FRPC_EXE%" >nul 2>&1
-    if not exist "%FRPC_EXE%" (
+    certutil -urlcache -split -f "!FRPC_LEGACY_URL!" "!FRPC_EXE!" >nul 2>&1
+    if not exist "!FRPC_EXE!" (
         echo [ERROR] Failed to download legacy frpc. Check internet connection.
-        echo  Try manually: certutil -urlcache -split -f %FRPC_LEGACY_URL% %FRPC_EXE%
         pause
         exit /b 1
     )
     echo  Legacy frpc downloaded successfully.
     set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.ini
-    copy /Y "%~dp0frpc.ini" "%FRPC_CFG%" >nul 2>&1
-    if not exist "%FRPC_CFG%" (
+    copy /Y "%~dp0frpc.ini" "!FRPC_CFG!" >nul 2>&1
+    if not exist "!FRPC_CFG!" (
         echo [ERROR] frpc.ini not found in package!
         pause
         exit /b 1
@@ -226,7 +220,8 @@ if %errorLevel% equ 0 (
 
 :: Install as Windows Service using NSSM
 echo [6/7] Installing Windows Service (NSSM)...
-"%NSSM_EXE%" install "%SERVICE_NAME%" "%FRPC_EXE%" "-c %FRPC_CFG%"
+echo  Using config: !FRPC_CFG!
+"%NSSM_EXE%" install "%SERVICE_NAME%" "%FRPC_EXE%" "-c !FRPC_CFG!"
 if %errorLevel% neq 0 (
     echo [ERROR] Failed to create service!
     echo Make sure you are running as Administrator.
