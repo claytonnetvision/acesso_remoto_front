@@ -187,6 +187,11 @@ export async function updateServer(id: number, data: Partial<InsertServer>) {
 export async function deleteServer(id: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
+  // Delete related records first to avoid FK constraint violations
+  await db.delete(serverPermissions).where(eq(serverPermissions.serverId, id));
+  await db.delete(credentials).where(eq(credentials.serverId, id));
+  await db.delete(accessLogs).where(eq(accessLogs.serverId, id));
+  await db.delete(importantLinks).where(eq(importantLinks.serverId, id));
   return db.delete(servers).where(eq(servers.id, id));
 }
 

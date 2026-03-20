@@ -84,10 +84,109 @@ const OS_LABELS: Record<string, string> = {
   other: "Outro",
 };
 
+function AgentServerList() {
+  const [, navigate] = useLocation();
+  const { data: allServers, isLoading } = trpc.servers.list.useQuery({});
+  const checkAllTunnels = trpc.frp.checkAllTunnels.useMutation({
+    onSuccess: (d) => toast.success(`Túneis verificados: ${d.updated} atualizado(s)`),
+    onError: () => toast.error("Erro ao verificar túneis"),
+  });
+
+  const onlineCount = allServers?.filter((s) => s.status === "online").length ?? 0;
+  const offlineCount = allServers?.filter((s) => s.status !== "online").length ?? 0;
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Agente / Túnel</h1>
+            <p className="text-sm text-muted-foreground mt-1">Selecione um servidor para configurar o agente de acesso remoto</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => checkAllTunnels.mutate()} disabled={checkAllTunnels.isPending} className="gap-2">
+            <RefreshCw className={`w-4 h-4 ${checkAllTunnels.isPending ? "animate-spin" : ""}`} />
+            Verificar Todos
+          </Button>
+        </div>
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 gap-4">
+          <Card className="border-green-200 bg-green-50 dark:bg-green-950/20">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center gap-3">
+                <Wifi className="w-8 h-8 text-green-600" />
+                <div>
+                  <p className="text-2xl font-bold text-green-700">{onlineCount}</p>
+                  <p className="text-sm text-green-600">Túneis Ativos</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-red-200 bg-red-50 dark:bg-red-950/20">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-center gap-3">
+                <WifiOff className="w-8 h-8 text-red-500" />
+                <div>
+                  <p className="text-2xl font-bold text-red-600">{offlineCount}</p>
+                  <p className="text-sm text-red-500">Túneis Fechados</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Server list */}
+        {isLoading ? (
+          <div className="flex items-center justify-center h-32">
+            <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {(allServers ?? []).map((srv) => (
+              <Card key={srv.id} className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate(`/agent/${srv.id}`)}>
+                <CardContent className="py-4 px-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Server className="w-5 h-5 text-muted-foreground" />
+                      <div>
+                        <p className="font-semibold">{srv.hostname}</p>
+                        <p className="text-xs text-muted-foreground">{srv.ipAddress} • {(srv as {osType?: string}).osType ?? "win2016plus"}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className={srv.status === "online" ? "text-green-600 border-green-300 bg-green-50" : "text-red-500 border-red-300 bg-red-50"}>
+                        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${srv.status === "online" ? "bg-green-500" : "bg-red-400"}`} />
+                        {srv.status === "online" ? "Online" : "Offline"}
+                      </Badge>
+                      <Button size="sm" variant="outline" className="gap-1">
+                        <Settings2 className="w-3.5 h-3.5" /> Configurar
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {(allServers ?? []).length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p>Nenhum servidor cadastrado.</p>
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => navigate("/servers")}>Cadastrar Servidor</Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </DashboardLayout>
+  );
+}
+
 export default function AgentSetup() {
   const params = useParams<{ id: string }>();
   const [, navigate] = useLocation();
   const serverId = parseInt(params.id ?? "0");
+
+  // If no server ID, show the server list
+  if (!serverId) return <AgentServerList />;
 
   const { data: server, isLoading: serverLoading } = trpc.servers.get.useQuery(
     { id: serverId },
@@ -156,7 +255,7 @@ export default function AgentSetup() {
         <div className="flex flex-col items-center justify-center h-64 gap-4">
           <AlertCircle className="w-12 h-12 text-destructive" />
           <p className="text-muted-foreground">Servidor não encontrado.</p>
-          <Button variant="outline" onClick={() => navigate("/servers")}>
+          <Button variant="outline" onClick={() => navigate("/agent")}>
             <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
           </Button>
         </div>
