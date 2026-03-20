@@ -60,3 +60,40 @@ describe("FRP Environment Variables", () => {
     expect(protocol).toBe("tcp");
   });
 });
+
+// ─── Helper to replicate isLegacyOsType logic ─────────────────────────────────
+const LEGACY_OS_TYPES = ["win2008r2", "win2012r2", "win7"] as const;
+function isLegacyOsType(osType: string | null | undefined): boolean {
+  return LEGACY_OS_TYPES.includes((osType ?? "win2016plus") as typeof LEGACY_OS_TYPES[number]);
+}
+
+describe("FRP OS Type Classification", () => {
+  it("should classify win2008r2 as legacy", () => {
+    expect(isLegacyOsType("win2008r2")).toBe(true);
+  });
+  it("should classify win2012r2 as legacy", () => {
+    expect(isLegacyOsType("win2012r2")).toBe(true);
+  });
+  it("should classify win7 as legacy", () => {
+    expect(isLegacyOsType("win7")).toBe(true);
+  });
+  it("should classify win2016plus as modern", () => {
+    expect(isLegacyOsType("win2016plus")).toBe(false);
+  });
+  it("should classify win10 as modern", () => {
+    expect(isLegacyOsType("win10")).toBe(false);
+  });
+  it("should classify win11 as modern", () => {
+    expect(isLegacyOsType("win11")).toBe(false);
+  });
+  it("should default to modern when osType is null/undefined", () => {
+    expect(isLegacyOsType(null)).toBe(false);
+    expect(isLegacyOsType(undefined)).toBe(false);
+  });
+  it("should use port 7001 for legacy OS and 7000 for modern", () => {
+    const modernPort = parseInt(process.env.FRP_SERVER_PORT ?? "7000");
+    const legacyPort = 7001;
+    expect(isLegacyOsType("win2008r2") ? legacyPort : modernPort).toBe(7001);
+    expect(isLegacyOsType("win2016plus") ? legacyPort : modernPort).toBe(7000);
+  });
+});

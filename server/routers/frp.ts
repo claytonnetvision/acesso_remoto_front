@@ -7,15 +7,16 @@
  * Architecture:
  *   [Windows Agent (frpc)] → [frps on this server] → [Manager Web UI]
  *
- * The frps server runs on port 7000 (TCP tunnel) and 7500 (dashboard API).
- * Each server gets a unique token and a dedicated remote port for RDP.
+ * frps modern  v0.61.1 → port 7000 (WS2016+, Win10/11)
+ * frps legacy  v0.51.3 → port 7001 (WS2008 R2, WS2012 R2, Win7)
+ * Dashboard               port 7500
+ * RDP tunnels             ports 20000-29999
  */
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import crypto from "crypto";
 
 // ─── Port allocation ──────────────────────────────────────────────────────────
 // RDP tunnels are allocated in range 20000-29999
@@ -25,6 +26,15 @@ const RDP_PORT_MAX  = 29999;
 function allocateRdpPort(serverId: number): number {
   // Deterministic port from serverId (wraps within range)
   return RDP_PORT_BASE + (serverId % (RDP_PORT_MAX - RDP_PORT_BASE));
+}
+
+// ─── OS classification ────────────────────────────────────────────────────────
+// Legacy OS: WS2008 R2, WS2012 R2, Win7 → frpc v0.51.3, port 7001, INI config
+// Modern OS: WS2016+, Win10/11 → frpc v0.61.1, port 7000, TOML config
+const LEGACY_OS_TYPES = ["win2008r2", "win2012r2", "win7"] as const;
+
+function isLegacyOsType(osType: string | null | undefined): boolean {
+  return LEGACY_OS_TYPES.includes((osType ?? "win2016plus") as typeof LEGACY_OS_TYPES[number]);
 }
 
 // ─── Config generators ────────────────────────────────────────────────────────
@@ -40,13 +50,11 @@ function generateFrpcToml(opts: {
   rdpRemotePort: number;
 }): string {
   const proxyName = `rdp-${opts.serverId}-${opts.serverName.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`;
-  // wss usa porta 443 e conecta via WebSocket Secure (para Render/Cloudflare)
-  // websocket usa a porta normal sem TLS
-  // tcp é o padrão para VPS com porta aberta
   const protocolLine = opts.protocol !== "tcp" ? `transport.protocol = "${opts.protocol}"` : "# transport.protocol = \"tcp\" (default)";
   return `# frpc.toml — Remote Access Manager Agent
 # Server: ${opts.serverName} (ID: ${opts.serverId})
 # Generated automatically — do not edit manually
+# Compatible with frpc v0.61.1+ (Windows Server 2016+, Windows 10/11)
 
 serverAddr = "${opts.serverAddr}"
 serverPort = ${opts.serverPort}
@@ -88,7 +96,7 @@ function generateFrpcIni(opts: {
   return `; frpc.ini — Remote Access Manager Agent (Legacy Format)
 ; Server: ${opts.serverName} (ID: ${opts.serverId})
 ; Generated automatically — do not edit manually
-; Compatible with frpc v0.51.x (Windows Server 2008 R2 / 2012 R2)
+; Compatible with frpc v0.51.x (Windows Server 2008 R2 / 2012 R2 / Win7)
 
 [common]
 server_addr = ${opts.serverAddr}
@@ -107,15 +115,15 @@ remote_port = ${opts.rdpRemotePort}
 `;
 }
 
-function generateInstallBat(opts: {
+function generateInstallBatModern(opts: {
   serverName: string;
   serverId: number;
 }): string {
   return `@echo off
 :: ============================================================
-:: Remote Access Manager - Agent Installer
+:: Remote Access Manager - Agent Installer (Modern)
 :: Server: ${opts.serverName} (ID: ${opts.serverId})
-:: Compatible with Windows Server 2008 R2 and later (32/64-bit)
+:: Compatible with Windows Server 2016+ / Windows 10 / Windows 11
 :: ============================================================
 :: Run this script as Administrator!
 
@@ -128,12 +136,12 @@ set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.toml
 set WINSW_EXE=C:\\RemoteAccessAgent\\winsw.exe
 set WINSW_XML=C:\\RemoteAccessAgent\\winsw.xml
 set WINSW_URL=http://31.97.16.12/winsw.exe
-set FRPC_LEGACY_URL=http://31.97.16.12/frpc-legacy.exe
 
 echo.
 echo  ============================================================
 echo   Remote Access Manager - Agent Installer
 echo   Server: ${opts.serverName}
+echo   Mode: Modern (frpc v0.61.1 + TOML config)
 echo  ============================================================
 echo.
 
@@ -147,73 +155,55 @@ if %errorLevel% neq 0 (
 )
 
 :: Create directory
-echo [1/7] Creating installation directory...
+echo [1/6] Creating installation directory...
 if not exist "%SERVICE_DIR%" mkdir "%SERVICE_DIR%"
 
-:: Copy frpc.toml (will be overridden for legacy OS)
-echo [2/7] Copying configuration...
-copy /Y "%~dp0frpc.toml" "%FRPC_CFG%" >nul 2>&1
-
-:: Detect Windows version and use correct frpc binary + config
-echo [3/7] Detecting Windows version...
-for /f "tokens=4-5 delims=[.] " %%i in ('ver') do set VERSION=%%i.%%j
-set WIN_MAJOR=0
-for /f "tokens=1 delims=." %%i in ("%VERSION%") do set WIN_MAJOR=%%i
-
-:: Windows 6.1 = Server 2008 R2 / Win7
-:: Windows 6.2 = Server 2012 / Win8
-:: Windows 6.3 = Server 2012 R2 / Win8.1
-:: Windows 10.0 = Server 2016+ / Win10+
-if "%WIN_MAJOR%" == "10" (
-    echo  Windows 10/Server 2016+ detected - using modern frpc with TOML config...
-    copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
-    if not exist "!FRPC_EXE!" (
-        echo  frpc.exe not in package, downloading modern version...
-        certutil -urlcache -split -f "http://31.97.16.12/frpc.exe" "!FRPC_EXE!" >nul 2>&1
-    )
-    set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.toml
-    copy /Y "%~dp0frpc.toml" "!FRPC_CFG!" >nul 2>&1
-) else (
-    echo  Windows Server 2008 R2 / 2012 R2 detected - using legacy frpc v0.51.3 with INI config...
-    certutil -urlcache -split -f "!FRPC_LEGACY_URL!" "!FRPC_EXE!" >nul 2>&1
-    if not exist "!FRPC_EXE!" (
-        echo [ERROR] Failed to download legacy frpc. Check internet connection.
+:: Copy frpc.exe
+echo [2/6] Copying frpc binary...
+copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
+if not exist "%FRPC_EXE%" (
+    echo  frpc.exe not found in package, downloading from VPS...
+    certutil -urlcache -split -f "http://31.97.16.12/frpc.exe" "%FRPC_EXE%" >nul 2>&1
+    if not exist "%FRPC_EXE%" (
+        echo [ERROR] Failed to get frpc.exe. Check internet connection.
         pause
         exit /b 1
     )
-    echo  Legacy frpc downloaded successfully.
-    set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.ini
-    copy /Y "%~dp0frpc.ini" "!FRPC_CFG!" >nul 2>&1
-    if not exist "!FRPC_CFG!" (
-        echo [ERROR] frpc.ini not found in package!
-        pause
-        exit /b 1
-    )
-    echo  Legacy INI config copied.
 )
+echo  frpc.exe ready.
 
-:: Download WinSW if not present (service wrapper compatible with WS2008 R2+)
-echo [4/7] Checking WinSW service wrapper...
+:: Copy frpc.toml
+echo [3/6] Copying configuration...
+copy /Y "%~dp0frpc.toml" "%FRPC_CFG%" >nul 2>&1
+if not exist "%FRPC_CFG%" (
+    echo [ERROR] frpc.toml not found in package!
+    pause
+    exit /b 1
+)
+echo  frpc.toml copied.
+
+:: Download WinSW
+echo [4/6] Checking WinSW service wrapper...
 if not exist "%WINSW_EXE%" (
-    echo  Downloading WinSW from management server...
+    echo  Downloading WinSW...
     certutil -urlcache -split -f "%WINSW_URL%" "%WINSW_EXE%" >nul 2>&1
     if not exist "%WINSW_EXE%" (
-        echo [ERROR] Failed to download WinSW. Check internet connection.
+        echo [ERROR] Failed to download WinSW.
         pause
         exit /b 1
     )
-    echo  WinSW downloaded successfully.
+    echo  WinSW downloaded.
 )
 
 :: Generate WinSW XML config
-echo [5/7] Creating service configuration...
+echo [5/6] Creating service configuration...
 echo ^<?xml version="1.0" encoding="UTF-8"?^> > "%WINSW_XML%"
 echo ^<service^> >> "%WINSW_XML%"
 echo   ^<id^>RemoteAccessAgent^</id^> >> "%WINSW_XML%"
 echo   ^<name^>Remote Access Manager Agent^</name^> >> "%WINSW_XML%"
 echo   ^<description^>Maintains secure tunnel to Remote Access Manager server^</description^> >> "%WINSW_XML%"
-echo   ^<executable^>!FRPC_EXE!^</executable^> >> "%WINSW_XML%"
-echo   ^<arguments^>-c !FRPC_CFG!^</arguments^> >> "%WINSW_XML%"
+echo   ^<executable^>%FRPC_EXE%^</executable^> >> "%WINSW_XML%"
+echo   ^<arguments^>-c %FRPC_CFG%^</arguments^> >> "%WINSW_XML%"
 echo   ^<log mode="roll"^>^</log^> >> "%WINSW_XML%"
 echo   ^<onfailure action="restart" delay="5 sec"/^> >> "%WINSW_XML%"
 echo   ^<onfailure action="restart" delay="10 sec"/^> >> "%WINSW_XML%"
@@ -223,27 +213,22 @@ echo ^</service^> >> "%WINSW_XML%"
 :: Remove existing service if present
 sc query "%SERVICE_NAME%" >nul 2>&1
 if %errorLevel% equ 0 (
+    echo  Removing existing service...
     "%WINSW_EXE%" stop "%WINSW_XML%" >nul 2>&1
     timeout /t 3 /nobreak >nul
     "%WINSW_EXE%" uninstall "%WINSW_XML%" >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
 
-:: Install as Windows Service using WinSW
-echo [6/7] Installing Windows Service (WinSW)...
-echo  Using config: !FRPC_CFG!
+:: Install and start service
+echo [6/6] Installing and starting Windows Service...
 "%WINSW_EXE%" install "%WINSW_XML%"
 if %errorLevel% neq 0 (
-    echo [ERROR] Failed to install service!
-    echo Make sure you are running as Administrator.
+    echo [ERROR] Failed to install service! Run as Administrator.
     pause
     exit /b 1
 )
-
-:: Start service
-echo [7/7] Starting service...
 "%WINSW_EXE%" start "%WINSW_XML%"
-
 timeout /t 5 /nobreak >nul
 
 :: Verify
@@ -255,20 +240,145 @@ if %errorLevel% equ 0 (
     echo.
 ) else (
     echo.
-    echo  [WARNING] Service may not have started. Trying once more...
-    "%NSSM_EXE%" start "%SERVICE_NAME%" >nul 2>&1
-    timeout /t 5 /nobreak >nul
-    sc query "%SERVICE_NAME%" | find "RUNNING" >nul
-    if %errorLevel% equ 0 (
-        echo  [OK] Agent started successfully!
-    ) else (
-        echo  [ERROR] Service failed to start. Check logs:
-        echo  %SERVICE_DIR%\\frpc-error.log
-    )
+    echo  [WARNING] Service may not have started. Check logs in %SERVICE_DIR%
     echo.
 )
 
-echo  Installation folder: C:\\RemoteAccessAgent
+echo  Installation folder: %SERVICE_DIR%
+echo  To uninstall: run uninstall.bat as Administrator
+echo.
+pause
+`;
+}
+
+function generateInstallBatLegacy(opts: {
+  serverName: string;
+  serverId: number;
+}): string {
+  return `@echo off
+:: ============================================================
+:: Remote Access Manager - Agent Installer (Legacy)
+:: Server: ${opts.serverName} (ID: ${opts.serverId})
+:: Compatible with Windows Server 2008 R2 / 2012 R2 / Windows 7
+:: ============================================================
+:: Run this script as Administrator!
+
+setlocal enabledelayedexpansion
+
+set SERVICE_NAME=RemoteAccessAgent
+set SERVICE_DIR=C:\\RemoteAccessAgent
+set FRPC_EXE=C:\\RemoteAccessAgent\\frpc.exe
+set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.ini
+set WINSW_EXE=C:\\RemoteAccessAgent\\winsw.exe
+set WINSW_XML=C:\\RemoteAccessAgent\\winsw.xml
+set WINSW_URL=http://31.97.16.12/winsw.exe
+set FRPC_LEGACY_URL=http://31.97.16.12/frpc-legacy.exe
+
+echo.
+echo  ============================================================
+echo   Remote Access Manager - Agent Installer
+echo   Server: ${opts.serverName}
+echo   Mode: Legacy (frpc v0.51.3 + INI config, porta 7001)
+echo  ============================================================
+echo.
+
+:: Check admin
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [ERROR] This script must be run as Administrator!
+    echo Right-click and select "Run as administrator"
+    pause
+    exit /b 1
+)
+
+:: Create directory
+echo [1/6] Creating installation directory...
+if not exist "%SERVICE_DIR%" mkdir "%SERVICE_DIR%"
+
+:: Download legacy frpc v0.51.3
+echo [2/6] Downloading legacy frpc v0.51.3...
+certutil -urlcache -split -f "%FRPC_LEGACY_URL%" "%FRPC_EXE%" >nul 2>&1
+if not exist "%FRPC_EXE%" (
+    echo [ERROR] Failed to download frpc-legacy. Check internet connection.
+    echo  URL: %FRPC_LEGACY_URL%
+    pause
+    exit /b 1
+)
+echo  frpc-legacy.exe downloaded as frpc.exe.
+
+:: Copy frpc.ini
+echo [3/6] Copying legacy INI configuration...
+copy /Y "%~dp0frpc.ini" "%FRPC_CFG%" >nul 2>&1
+if not exist "%FRPC_CFG%" (
+    echo [ERROR] frpc.ini not found in package!
+    pause
+    exit /b 1
+)
+echo  frpc.ini copied.
+
+:: Download WinSW
+echo [4/6] Checking WinSW service wrapper...
+if not exist "%WINSW_EXE%" (
+    echo  Downloading WinSW...
+    certutil -urlcache -split -f "%WINSW_URL%" "%WINSW_EXE%" >nul 2>&1
+    if not exist "%WINSW_EXE%" (
+        echo [ERROR] Failed to download WinSW.
+        pause
+        exit /b 1
+    )
+    echo  WinSW downloaded.
+)
+
+:: Generate WinSW XML config
+echo [5/6] Creating service configuration...
+echo ^<?xml version="1.0" encoding="UTF-8"?^> > "%WINSW_XML%"
+echo ^<service^> >> "%WINSW_XML%"
+echo   ^<id^>RemoteAccessAgent^</id^> >> "%WINSW_XML%"
+echo   ^<name^>Remote Access Manager Agent^</name^> >> "%WINSW_XML%"
+echo   ^<description^>Maintains secure tunnel to Remote Access Manager server^</description^> >> "%WINSW_XML%"
+echo   ^<executable^>%FRPC_EXE%^</executable^> >> "%WINSW_XML%"
+echo   ^<arguments^>-c %FRPC_CFG%^</arguments^> >> "%WINSW_XML%"
+echo   ^<log mode="roll"^>^</log^> >> "%WINSW_XML%"
+echo   ^<onfailure action="restart" delay="5 sec"/^> >> "%WINSW_XML%"
+echo   ^<onfailure action="restart" delay="10 sec"/^> >> "%WINSW_XML%"
+echo   ^<onfailure action="restart" delay="30 sec"/^> >> "%WINSW_XML%"
+echo ^</service^> >> "%WINSW_XML%"
+
+:: Remove existing service if present
+sc query "%SERVICE_NAME%" >nul 2>&1
+if %errorLevel% equ 0 (
+    echo  Removing existing service...
+    "%WINSW_EXE%" stop "%WINSW_XML%" >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    "%WINSW_EXE%" uninstall "%WINSW_XML%" >nul 2>&1
+    timeout /t 2 /nobreak >nul
+)
+
+:: Install and start service
+echo [6/6] Installing and starting Windows Service...
+"%WINSW_EXE%" install "%WINSW_XML%"
+if %errorLevel% neq 0 (
+    echo [ERROR] Failed to install service! Run as Administrator.
+    pause
+    exit /b 1
+)
+"%WINSW_EXE%" start "%WINSW_XML%"
+timeout /t 5 /nobreak >nul
+
+:: Verify
+sc query "%SERVICE_NAME%" | find "RUNNING" >nul
+if %errorLevel% equ 0 (
+    echo.
+    echo  [OK] Agent installed and running successfully!
+    echo  The server should appear ONLINE in the manager within 30 seconds.
+    echo.
+) else (
+    echo.
+    echo  [WARNING] Service may not have started. Check logs in %SERVICE_DIR%
+    echo.
+)
+
+echo  Installation folder: %SERVICE_DIR%
 echo  To uninstall: run uninstall.bat as Administrator
 echo.
 pause
@@ -281,7 +391,9 @@ function generateUninstallBat(): string {
 :: Run as Administrator!
 
 set SERVICE_NAME=RemoteAccessAgent
-set SERVICE_DIR=%ProgramFiles%\\RemoteAccessAgent
+set SERVICE_DIR=C:\\RemoteAccessAgent
+set WINSW_EXE=C:\\RemoteAccessAgent\\winsw.exe
+set WINSW_XML=C:\\RemoteAccessAgent\\winsw.xml
 
 net session >nul 2>&1
 if %errorLevel% neq 0 (
@@ -292,9 +404,16 @@ if %errorLevel% neq 0 (
 
 echo Stopping and removing Remote Access Manager Agent...
 
-sc stop "%SERVICE_NAME%" >nul 2>&1
-timeout /t 3 /nobreak >nul
-sc delete "%SERVICE_NAME%" >nul 2>&1
+if exist "%WINSW_EXE%" (
+    "%WINSW_EXE%" stop "%WINSW_XML%" >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    "%WINSW_EXE%" uninstall "%WINSW_XML%" >nul 2>&1
+    timeout /t 2 /nobreak >nul
+) else (
+    sc stop "%SERVICE_NAME%" >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    sc delete "%SERVICE_NAME%" >nul 2>&1
+)
 
 if exist "%SERVICE_DIR%" (
     timeout /t 2 /nobreak >nul
@@ -311,38 +430,49 @@ function generateReadme(opts: {
   serverId: number;
   serverAddr: string;
   rdpRemotePort: number;
+  isLegacy: boolean;
+  osType: string;
 }): string {
+  const modeLabel = opts.isLegacy
+    ? "Legacy (frpc v0.51.3 + INI config, porta 7001)"
+    : "Modern (frpc v0.61.1 + TOML config, porta 7000)";
+  const configFile = opts.isLegacy ? "frpc.ini" : "frpc.toml";
+  const frpcNote = opts.isLegacy
+    ? "frpc-legacy.exe é baixado automaticamente pelo install.bat"
+    : "frpc.exe — FRP client v0.61.1 (tunnel agent)";
   return `# Remote Access Manager — Agent
 ## Server: ${opts.serverName} (ID: ${opts.serverId})
+## OS Mode: ${modeLabel}
 
 ## Contents
-- frpc.exe        — FRP client (tunnel agent)
-- frpc.toml       — Configuration (pre-configured for this server)
+- ${configFile}     — Configuration (pre-configured for this server)
 - install.bat     — Installer (run as Administrator)
 - uninstall.bat   — Uninstaller (run as Administrator)
+- ${frpcNote}
 
 ## Installation
 
-1. Extract all files to a folder
-2. Right-click install.bat → "Run as administrator"
-3. Wait for "Agent installed and running successfully!"
-4. The server will appear ONLINE in the manager within 30 seconds
+1. Coloque todos os arquivos na mesma pasta (ex: C:\\Temp\\agent\\)
+2. Clique com botão direito em install.bat
+3. Selecione "Executar como administrador"
+4. Aguarde: "Agent installed and running successfully!"
+5. O servidor aparecerá ONLINE no painel em até 30 segundos
 
 ## Requirements
-- Windows Server 2012 R2 or later (or Windows 10+)
+- OS: ${opts.osType}
 - Administrator privileges for installation
-- Outbound internet access on port ${opts.serverAddr.includes(":") ? opts.serverAddr.split(":")[1] : 7000} (TCP)
+- Outbound internet access on port ${opts.isLegacy ? 7001 : 7000} (TCP)
 - No inbound firewall rules needed
 
 ## How it works
 The agent creates a secure outbound tunnel to the manager server.
 RDP (port 3389) is forwarded through the tunnel to remote port ${opts.rdpRemotePort}.
-No inbound ports need to be opened on the client's firewall.
+Connect via RDP to: ${opts.serverAddr}:${opts.rdpRemotePort}
 
 ## Troubleshooting
 - Check service status: sc query RemoteAccessAgent
-- View logs: %ProgramFiles%\\RemoteAccessAgent\\frpc.log
-- Restart service: sc stop RemoteAccessAgent && sc start RemoteAccessAgent
+- View logs: C:\\RemoteAccessAgent\\
+- Restart: net stop RemoteAccessAgent && net start RemoteAccessAgent
 `;
 }
 
@@ -363,7 +493,9 @@ export const frpRouter = router({
 
   /**
    * Generate the agent package configuration for a specific server.
-   * Returns frpc.toml content + install scripts as strings.
+   * Returns frpc.toml/frpc.ini content + install scripts as strings.
+   * Automatically selects legacy (WS2008 R2/2012 R2/Win7) or modern mode
+   * based on the server's osType field.
    */
   generateAgentConfig: protectedProcedure
     .input(z.object({ serverId: z.number() }))
@@ -379,16 +511,28 @@ export const frpRouter = router({
       }
 
       const serverAddr = process.env.FRP_SERVER_ADDR ?? process.env.RENDER_EXTERNAL_HOSTNAME ?? "your-server.com";
-      const serverPort = parseInt(process.env.FRP_SERVER_PORT ?? "7000");
-      const protocol = process.env.FRP_SERVER_PROTOCOL ?? "tcp"; // "tcp" | "websocket" | "wss"
+      const protocol = process.env.FRP_SERVER_PROTOCOL ?? "tcp";
       const rdpRemotePort = allocateRdpPort(server.id);
 
-      // Generate or retrieve the server's frp token
-      const token = await db.getOrCreateFrpToken(server.id);
+      // Determine OS mode based on osType field
+      const osType = server.osType ?? "win2016plus";
+      const isLegacy = isLegacyOsType(osType);
 
+      // Legacy: port 7001, frps-legacy v0.51.3, shared token
+      // Modern: port 7000, frps v0.61.1, unique token per server
+      const modernPort = parseInt(process.env.FRP_SERVER_PORT ?? "7000");
+      const legacyPort = 7001;
+      const serverPort = isLegacy ? legacyPort : modernPort;
+
+      // Generate or retrieve the server's unique frp token (used for modern frps)
+      const token = await db.getOrCreateFrpToken(server.id);
+      // Legacy frps uses a shared token (frps-legacy v0.51.3 single token auth)
+      const legacyToken = "legacy_token_2024_RemoteManager";
+
+      // Always generate both configs for reference
       const frpcToml = generateFrpcToml({
         serverAddr,
-        serverPort,
+        serverPort: modernPort,
         protocol,
         token,
         serverName: server.hostname,
@@ -397,12 +541,9 @@ export const frpRouter = router({
         rdpRemotePort,
       });
 
-      // Legacy INI format for frpc v0.51.x (Windows Server 2008 R2 / 2012 R2)
-      // Uses port 7001 (frps-legacy v0.51.3) and a shared legacy token
-      const legacyToken = "legacy_token_2024_RemoteManager";
       const frpcIni = generateFrpcIni({
         serverAddr,
-        serverPort: 7001,
+        serverPort: legacyPort,
         token: legacyToken,
         serverName: server.hostname,
         serverId: server.id,
@@ -410,10 +551,10 @@ export const frpRouter = router({
         rdpRemotePort,
       });
 
-      const installBat = generateInstallBat({
-        serverName: server.hostname,
-        serverId: server.id,
-      });
+      // Generate the correct install.bat based on OS type
+      const installBat = isLegacy
+        ? generateInstallBatLegacy({ serverName: server.hostname, serverId: server.id })
+        : generateInstallBatModern({ serverName: server.hostname, serverId: server.id });
 
       const uninstallBat = generateUninstallBat();
 
@@ -422,6 +563,8 @@ export const frpRouter = router({
         serverId: server.id,
         serverAddr,
         rdpRemotePort,
+        isLegacy,
+        osType,
       });
 
       // Log the action
@@ -432,7 +575,7 @@ export const frpRouter = router({
         action: "create",
         resourceType: "agent_config",
         resourceId: server.id,
-        details: `Pacote de agente gerado para: ${server.hostname}`,
+        details: `Pacote de agente gerado para: ${server.hostname} (${isLegacy ? "legacy" : "modern"})`,
       });
 
       return {
@@ -441,12 +584,16 @@ export const frpRouter = router({
         rdpRemotePort,
         serverAddr,
         serverPort,
+        isLegacy,
+        osType,
         frpcToml,
         frpcIni,
         installBat,
         uninstallBat,
         readme,
-        frpcDownloadUrl: "https://github.com/fatedier/frp/releases/latest/download/frp_0.61.1_windows_amd64.zip",
+        frpcDownloadUrl: isLegacy
+          ? "http://31.97.16.12/frpc-legacy.exe"
+          : "http://31.97.16.12/frpc.exe",
       };
     }),
 
@@ -459,8 +606,6 @@ export const frpRouter = router({
       const server = await db.getServerById(input.serverId);
       if (!server) throw new TRPCError({ code: "NOT_FOUND" });
 
-      const rdpRemotePort = allocateRdpPort(server.id);
-
       try {
         const dashboardAddr = process.env.FRP_DASHBOARD_ADDR ?? "127.0.0.1";
         const dashboardPort = parseInt(process.env.FRP_DASHBOARD_PORT ?? "7500");
@@ -472,16 +617,17 @@ export const frpRouter = router({
           `http://${dashboardAddr}:${dashboardPort}/api/proxy/tcp`,
           {
             headers: { Authorization: `Basic ${auth}` },
-            signal: AbortSignal.timeout(3000),
+            signal: AbortSignal.timeout(5000),
           }
         );
 
-        if (!response.ok) return { online: false, rdpRemotePort };
+        if (!response.ok) return { online: false, rdpRemotePort: allocateRdpPort(server.id) };
 
         const data = await response.json() as { proxies?: Array<{ status: string; conf?: { remotePort?: number } }> };
         const proxies = data.proxies ?? [];
+        const rdpRemotePort = allocateRdpPort(server.id);
         const isOnline = proxies.some(
-          (p) => p.conf?.remotePort === rdpRemotePort && p.status === "online"
+          (p) => p.status === "online" && p.conf?.remotePort === rdpRemotePort
         );
 
         // Update server status in DB
@@ -492,12 +638,13 @@ export const frpRouter = router({
 
         return { online: isOnline, rdpRemotePort };
       } catch {
-        return { online: false, rdpRemotePort };
+        return { online: false, rdpRemotePort: allocateRdpPort(server.id) };
       }
     }),
 
   /**
-   * Bulk check all servers' tunnel status.
+   * Check all tunnels by querying the frps dashboard API.
+   * Updates server status in DB.
    */
   checkAllTunnels: protectedProcedure.mutation(async () => {
     try {
