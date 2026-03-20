@@ -5,6 +5,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerLocalAuthRoutes } from "./localAuth";
+import { registerFrpAuthRoute } from "../frpAuth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -38,6 +39,8 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Local auth (username/password) under /api/auth/local-login
   registerLocalAuthRoutes(app);
+  // FRP server plugin auth — validates per-server tokens
+  registerFrpAuthRoute(app);
   // tRPC API
   app.use(
     "/api/trpc",
