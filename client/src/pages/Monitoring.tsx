@@ -81,6 +81,7 @@ function MetricBar({
 type MetricsResult = {
   serverId: number;
   hostname: string;
+  clientName?: string;
   available: boolean;
   metricsPort?: number;
   cpu?: number;
@@ -103,8 +104,13 @@ function ServerMetricsCard({ server }: { server: MetricsResult }) {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Server className="h-5 w-5 text-muted-foreground" />
-            <CardTitle className="text-base">{server.hostname}</CardTitle>
+            <Server className="h-5 w-5 text-muted-foreground shrink-0" />
+            <div>
+              {server.clientName && (
+                <p className="text-xs text-muted-foreground font-medium leading-none mb-0.5">{server.clientName}</p>
+              )}
+              <CardTitle className="text-base leading-none">{server.hostname}</CardTitle>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {hasAlerts && (

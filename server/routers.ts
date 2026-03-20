@@ -175,6 +175,7 @@ export const appRouter = router({
           operatingSystem: z.string().optional(),
           description: z.string().optional(),
           notes: z.string().optional(),
+          enableMetrics: z.boolean().default(true),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -195,6 +196,7 @@ export const appRouter = router({
           description: z.string().optional(),
           notes: z.string().optional(),
           status: z.enum(["online", "offline", "unknown", "maintenance"]).optional(),
+          enableMetrics: z.boolean().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {

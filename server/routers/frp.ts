@@ -988,7 +988,7 @@ try {
    * Fetch metrics for all servers at once (for the monitoring dashboard).
    */
   getAllMetrics: protectedProcedure.query(async ({ ctx }) => {
-    const servers = ctx.user.role === "admin"
+    const allServers = ctx.user.role === "admin"
       ? await db.getServers()
       : await (async () => {
           const perms = await db.getPermissionsByUser(ctx.user.id);
@@ -997,17 +997,25 @@ try {
           return all.filter((s) => ids.includes(s.id));
         })();
 
+    // Only monitor servers with metrics enabled (enableMetrics !== false)
+    const servers = allServers.filter((s) => s.enableMetrics !== false);
+
+    // Build client name map for display in monitoring cards
+    const clientsList = await db.getClients();
+    const clientMap = new Map(clientsList.map((c) => [c.id, c.name]));
+
     const serverAddr = process.env.FRP_SERVER_ADDR ?? "31.97.16.12";
     const metricsProxyPort = process.env.FRP_METRICS_PROXY_PORT ?? "7600";
     const results = await Promise.all(
       servers.map(async (server) => {
         const metricsPort = allocateMetricsPort(server.id);
+        const clientName = clientMap.get(server.clientId) ?? undefined;
         try {
           const response = await fetch(
             `http://${serverAddr}:${metricsProxyPort}/metrics/${metricsPort}`,
             { signal: AbortSignal.timeout(4000) }
           );
-          if (!response.ok) return { serverId: server.id, hostname: server.hostname, available: false, metricsPort };
+          if (!response.ok) return { serverId: server.id, hostname: server.hostname, clientName, available: false, metricsPort };
           const data = await response.json() as {
             cpu: number;
             ram: { totalMB: number; usedMB: number; freeMB: number; pct: number };
@@ -1017,10 +1025,10 @@ try {
             timestamp: number;
             error?: string;
           };
-          if (data.error) return { serverId: server.id, hostname: server.hostname, available: false, metricsPort };
-          return { serverId: server.id, hostname: server.hostname, available: true, metricsPort, ...data };
+          if (data.error) return { serverId: server.id, hostname: server.hostname, clientName, available: false, metricsPort };
+          return { serverId: server.id, hostname: server.hostname, clientName, available: true, metricsPort, ...data };
         } catch {
-          return { serverId: server.id, hostname: server.hostname, available: false, metricsPort };
+          return { serverId: server.id, hostname: server.hostname, clientName, available: false, metricsPort };
         }
       })
     );

@@ -47,14 +47,27 @@ const statusConfig: Record<ServerStatus, { label: string; icon: React.ElementTyp
   maintenance: { label: "Manutenção", icon: Wrench, cls: "bg-orange-100 text-orange-700 border-orange-200" },
 };
 
+const OS_OPTIONS = [
+  { value: "win2016plus", label: "Windows Server 2016 / 2019 / 2022" },
+  { value: "win2012r2", label: "Windows Server 2012 R2" },
+  { value: "win2008r2", label: "Windows Server 2008 R2" },
+  { value: "win11", label: "Windows 11" },
+  { value: "win10", label: "Windows 10" },
+  { value: "win7", label: "Windows 7" },
+  { value: "other", label: "Outro" },
+] as const;
+
+type OsType = typeof OS_OPTIONS[number]["value"];
+
 type FormData = {
   clientId: string;
   hostname: string;
   ipAddress: string;
   rdpPort: string;
-  operatingSystem: string;
+  osType: OsType;
   description: string;
   notes: string;
+  enableMetrics: boolean;
 };
 
 const emptyForm: FormData = {
@@ -62,9 +75,10 @@ const emptyForm: FormData = {
   hostname: "",
   ipAddress: "",
   rdpPort: "3389",
-  operatingSystem: "Windows Server 2022",
+  osType: "win2016plus",
   description: "",
   notes: "",
+  enableMetrics: true,
 };
 
 export default function Servers() {
@@ -119,9 +133,10 @@ export default function Servers() {
       hostname: s.hostname,
       ipAddress: s.ipAddress,
       rdpPort: s.rdpPort.toString(),
-      operatingSystem: s.operatingSystem ?? "",
+      osType: (s.osType as OsType) ?? "win2016plus",
       description: s.description ?? "",
       notes: s.notes ?? "",
+      enableMetrics: s.enableMetrics ?? true,
     });
     setOpen(true);
   }
@@ -133,9 +148,11 @@ export default function Servers() {
       hostname: form.hostname,
       ipAddress: form.ipAddress,
       rdpPort: parseInt(form.rdpPort) || 3389,
-      operatingSystem: form.operatingSystem || undefined,
+      osType: form.osType,
+      operatingSystem: OS_OPTIONS.find(o => o.value === form.osType)?.label,
       description: form.description || undefined,
       notes: form.notes || undefined,
+      enableMetrics: form.enableMetrics,
     };
     if (editId) {
       updateMutation.mutate({ id: editId, ...data });
@@ -340,8 +357,15 @@ export default function Servers() {
                 <Input type="number" value={form.rdpPort} onChange={(e) => setForm({ ...form, rdpPort: e.target.value })} placeholder="3389" />
               </div>
               <div className="space-y-1.5">
-                <Label>Sistema Operacional</Label>
-                <Input value={form.operatingSystem} onChange={(e) => setForm({ ...form, operatingSystem: e.target.value })} placeholder="Windows Server 2022" />
+                <Label>Sistema Operacional *</Label>
+                <Select value={form.osType} onValueChange={(v) => setForm({ ...form, osType: v as OsType })}>
+                  <SelectTrigger><SelectValue placeholder="Selecione o SO" /></SelectTrigger>
+                  <SelectContent>
+                    {OS_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="col-span-2 space-y-1.5">
                 <Label>Descrição</Label>
@@ -350,6 +374,27 @@ export default function Servers() {
               <div className="col-span-2 space-y-1.5">
                 <Label>Observações</Label>
                 <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Informações adicionais..." rows={3} />
+              </div>
+              <div className="col-span-2">
+                <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">Monitoramento de métricas</p>
+                    <p className="text-xs text-muted-foreground">Coleta CPU, RAM e disco via túnal FRP. Desative se não quiser instalar o agente de métricas neste servidor.</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={form.enableMetrics}
+                    onClick={() => setForm({ ...form, enableMetrics: !form.enableMetrics })}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${
+                      form.enableMetrics ? 'bg-green-500' : 'bg-muted-foreground/30'
+                    }`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                      form.enableMetrics ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </div>
               </div>
             </div>
             <div className="flex gap-2 justify-end pt-2">
