@@ -143,3 +143,4 @@ export const accessLogs = pgTable("access_logs", {
 
 export type AccessLog = typeof accessLogs.$inferSelect;
 export type InsertAccessLog = typeof accessLogs.$inferInsert;
+//
