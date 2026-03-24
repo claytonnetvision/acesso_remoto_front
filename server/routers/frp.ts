@@ -21,6 +21,57 @@ import * as db from "../db";
 // ─── Port allocation ──────────────────────────────────────────────────────────
 // RDP tunnels are allocated in range 20000-29999
 const RDP_PORT_BASE = 20000;
+
+// ─── Dashboard helpers ───────────────────────────────────────────────────────
+/**
+ * Fetches online proxy ports from a single frps dashboard.
+ * Returns empty set on failure (dashboard offline or unreachable).
+ */
+async function fetchOnlinePortsFromDashboard(
+  addr: string,
+  port: number,
+  user: string,
+  pass: string
+): Promise<Set<number>> {
+  try {
+    const auth = Buffer.from(`${user}:${pass}`).toString("base64");
+    const response = await fetch(`http://${addr}:${port}/api/proxy/tcp`, {
+      headers: { Authorization: `Basic ${auth}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return new Set();
+    const data = await response.json() as { proxies?: Array<{ status: string; conf?: { remotePort?: number } }> };
+    const proxies = data.proxies ?? [];
+    return new Set(
+      proxies
+        .filter((p) => p.status === "online" && p.conf?.remotePort)
+        .map((p) => p.conf!.remotePort!)
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Queries BOTH frps dashboards (modern port 7500 + legacy port 7502)
+ * and returns the union of all online proxy ports.
+ */
+async function fetchAllOnlineProxyPorts(): Promise<Set<number>> {
+  const addr = process.env.FRP_DASHBOARD_ADDR ?? "127.0.0.1";
+  const user = process.env.FRP_DASHBOARD_USER ?? "admin";
+  const pass = process.env.FRP_DASHBOARD_PASS ?? "AdminFrps@2024";
+  const modernPort = parseInt(process.env.FRP_DASHBOARD_PORT ?? "7500");
+  const legacyPort = 7502; // frps-legacy dashboard is always on 7502
+
+  const [modernPorts, legacyPorts] = await Promise.all([
+    fetchOnlinePortsFromDashboard(addr, modernPort, user, pass),
+    fetchOnlinePortsFromDashboard(addr, legacyPort, user, pass),
+  ]);
+
+  // Merge both sets using Array.from for TS compatibility
+  const combined = new Set(Array.from(modernPorts).concat(Array.from(legacyPorts)));
+  return combined;
+}
 const RDP_PORT_MAX  = 29999;
 
 function allocateRdpPort(serverId: number): number {
@@ -371,19 +422,23 @@ function generateInstallBatLegacy(opts: {
 :: Remote Access Manager - Agent Installer (Legacy)
 :: Server: ${opts.serverName} (ID: ${opts.serverId})
 :: Compatible with Windows Server 2008 R2 / 2012 R2 / Windows 7
+:: Installs: frpc tunnel agent + metrics monitoring agent
 :: ============================================================
 :: Run this script as Administrator!
-
 setlocal enabledelayedexpansion
-
 set SERVICE_NAME=RemoteAccessAgent
+set METRICS_SERVICE_NAME=RemoteAccessMetrics
 set SERVICE_DIR=C:\\RemoteAccessAgent
 set FRPC_EXE=C:\\RemoteAccessAgent\\frpc.exe
 set FRPC_CFG=C:\\RemoteAccessAgent\\frpc.ini
+set METRICS_PS1=C:\\RemoteAccessAgent\\metrics-agent.ps1
+set METRICS_XML=C:\\RemoteAccessAgent\\metrics-winsw.xml
 set WINSW_EXE=C:\\RemoteAccessAgent\\winsw.exe
 set WINSW_XML=C:\\RemoteAccessAgent\\winsw.xml
+set METRICS_WINSW_EXE=C:\\RemoteAccessAgent\\metrics-winsw.exe
 set WINSW_URL=http://31.97.16.12/winsw.exe
 set FRPC_LEGACY_URL=http://31.97.16.12/frpc-legacy.exe
+set METRICS_PS1_URL=http://31.97.16.12/metrics-agent.ps1
 
 echo.
 echo  ============================================================
@@ -418,7 +473,7 @@ if not exist "%FRPC_EXE%" (
 echo  frpc-legacy.exe downloaded as frpc.exe.
 
 :: Copy frpc.ini
-echo [3/6] Copying legacy INI configuration...
+echo [3/8] Copying legacy INI configuration...
 copy /Y "%~dp0frpc.ini" "%FRPC_CFG%" >nul 2>&1
 if not exist "%FRPC_CFG%" (
     echo [ERROR] frpc.ini not found in package!
@@ -427,8 +482,21 @@ if not exist "%FRPC_CFG%" (
 )
 echo  frpc.ini copied.
 
+:: Download metrics agent
+echo [4/8] Installing metrics monitoring agent...
+copy /Y "%~dp0metrics-agent.ps1" "%METRICS_PS1%" >nul 2>&1
+if not exist "%METRICS_PS1%" (
+    echo  Downloading metrics-agent.ps1 from VPS...
+    certutil -urlcache -split -f "%METRICS_PS1_URL%" "%METRICS_PS1%" >nul 2>&1
+)
+if exist "%METRICS_PS1%" (
+    echo  metrics-agent.ps1 ready.
+) else (
+    echo  [WARNING] metrics-agent.ps1 not available, monitoring disabled.
+)
+
 :: Download WinSW
-echo [4/6] Checking WinSW service wrapper...
+echo [5/8] Checking WinSW service wrapper...
 if not exist "%WINSW_EXE%" (
     echo  Downloading WinSW...
     certutil -urlcache -split -f "%WINSW_URL%" "%WINSW_EXE%" >nul 2>&1
@@ -440,8 +508,8 @@ if not exist "%WINSW_EXE%" (
     echo  WinSW downloaded.
 )
 
-:: Generate WinSW XML config
-echo [5/6] Creating service configuration...
+:: Generate WinSW XML config for tunnel
+echo [6/8] Creating service configurations...
 echo ^<?xml version="1.0" encoding="UTF-8"?^> > "%WINSW_XML%"
 echo ^<service^> >> "%WINSW_XML%"
 echo   ^<id^>RemoteAccessAgent^</id^> >> "%WINSW_XML%"
@@ -455,28 +523,68 @@ echo   ^<onfailure action="restart" delay="10 sec"/^> >> "%WINSW_XML%"
 echo   ^<onfailure action="restart" delay="30 sec"/^> >> "%WINSW_XML%"
 echo ^</service^> >> "%WINSW_XML%"
 
-:: Remove existing service if present
+:: Generate WinSW XML config for metrics agent
+if exist "%METRICS_PS1%" (
+    copy /Y "%WINSW_EXE%" "%METRICS_WINSW_EXE%" >nul 2>&1
+    echo ^<?xml version="1.0" encoding="UTF-8"?^> > "%METRICS_XML%"
+    echo ^<service^> >> "%METRICS_XML%"
+    echo   ^<id^>RemoteAccessMetrics^</id^> >> "%METRICS_XML%"
+    echo   ^<name^>Remote Access Metrics Agent^</name^> >> "%METRICS_XML%"
+    echo   ^<description^>Collects CPU/RAM/Disk metrics for Remote Access Manager^</description^> >> "%METRICS_XML%"
+    echo   ^<executable^>powershell.exe^</executable^> >> "%METRICS_XML%"
+    echo   ^<arguments^>-ExecutionPolicy Bypass -NonInteractive -File "%METRICS_PS1%"^</arguments^> >> "%METRICS_XML%"
+    echo   ^<log mode="roll"^>^</log^> >> "%METRICS_XML%"
+    echo   ^<onfailure action="restart" delay="30 sec"/^> >> "%METRICS_XML%"
+    echo   ^<onfailure action="restart" delay="60 sec"/^> >> "%METRICS_XML%"
+    echo ^</service^> >> "%METRICS_XML%"
+)
+
+:: Remove existing services if present
 sc query "%SERVICE_NAME%" >nul 2>&1
 if %errorLevel% equ 0 (
-    echo  Removing existing service...
+    echo  Removing existing tunnel service...
     "%WINSW_EXE%" stop "%WINSW_XML%" >nul 2>&1
     timeout /t 3 /nobreak >nul
     "%WINSW_EXE%" uninstall "%WINSW_XML%" >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
+sc query "%METRICS_SERVICE_NAME%" >nul 2>&1
+if %errorLevel% equ 0 (
+    echo  Removing existing metrics service...
+    "%METRICS_WINSW_EXE%" stop "%METRICS_XML%" >nul 2>&1
+    timeout /t 2 /nobreak >nul
+    "%METRICS_WINSW_EXE%" uninstall "%METRICS_XML%" >nul 2>&1
+    timeout /t 2 /nobreak >nul
+)
 
-:: Install and start service
-echo [6/6] Installing and starting Windows Service...
+:: Install and start tunnel service
+echo [7/8] Installing tunnel Windows Service...
 "%WINSW_EXE%" install "%WINSW_XML%"
 if %errorLevel% neq 0 (
-    echo [ERROR] Failed to install service! Run as Administrator.
+    echo [ERROR] Failed to install tunnel service! Run as Administrator.
     pause
     exit /b 1
 )
 "%WINSW_EXE%" start "%WINSW_XML%"
-timeout /t 5 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
-:: Verify
+:: Install and start metrics service
+echo [8/8] Installing metrics Windows Service...
+if exist "%METRICS_PS1%" (
+    "%METRICS_WINSW_EXE%" install "%METRICS_XML%" >nul 2>&1
+    "%METRICS_WINSW_EXE%" start "%METRICS_XML%" >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    sc query "%METRICS_SERVICE_NAME%" | find "RUNNING" >nul
+    if %errorLevel% equ 0 (
+        echo  Metrics agent started successfully.
+    ) else (
+        echo  [WARNING] Metrics agent may not have started. Monitoring may be unavailable.
+    )
+) else (
+    echo  Metrics agent skipped (ps1 not available).
+)
+
+:: Verify tunnel
 sc query "%SERVICE_NAME%" | find "RUNNING" >nul
 if %errorLevel% equ 0 (
     echo.
@@ -490,6 +598,8 @@ if %errorLevel% equ 0 (
 )
 
 echo  Installation folder: %SERVICE_DIR%
+echo  Tunnel  : RemoteAccessAgent (frpc legacy tunnel)
+echo  Metrics : RemoteAccessMetrics (CPU/RAM/Disk monitoring)
 echo  To uninstall: run uninstall.bat as Administrator
 echo.
 pause
@@ -822,44 +932,22 @@ try {
     }),
 
   /**
-   * Check if a server's tunnel is active by querying the frps dashboard API.
+   * Check if a server's tunnel is active by querying BOTH frps dashboards.
+   * Modern frps: port 7500 | Legacy frps: port 7502
    */
   checkTunnelStatus: protectedProcedure
     .input(z.object({ serverId: z.number() }))
     .query(async ({ input }) => {
       const server = await db.getServerById(input.serverId);
       if (!server) throw new TRPCError({ code: "NOT_FOUND" });
-
       try {
-        const dashboardAddr = process.env.FRP_DASHBOARD_ADDR ?? "127.0.0.1";
-        const dashboardPort = parseInt(process.env.FRP_DASHBOARD_PORT ?? "7500");
-        const dashUser = process.env.FRP_DASHBOARD_USER ?? "admin";
-        const dashPass = process.env.FRP_DASHBOARD_PASS ?? "admin";
-
-        const auth = Buffer.from(`${dashUser}:${dashPass}`).toString("base64");
-        const response = await fetch(
-          `http://${dashboardAddr}:${dashboardPort}/api/proxy/tcp`,
-          {
-            headers: { Authorization: `Basic ${auth}` },
-            signal: AbortSignal.timeout(5000),
-          }
-        );
-
-        if (!response.ok) return { online: false, rdpRemotePort: allocateRdpPort(server.id) };
-
-        const data = await response.json() as { proxies?: Array<{ status: string; conf?: { remotePort?: number } }> };
-        const proxies = data.proxies ?? [];
+        const onlinePorts = await fetchAllOnlineProxyPorts();
         const rdpRemotePort = allocateRdpPort(server.id);
-        const isOnline = proxies.some(
-          (p) => p.status === "online" && p.conf?.remotePort === rdpRemotePort
-        );
-
-        // Update server status in DB
+        const isOnline = onlinePorts.has(rdpRemotePort);
         await db.updateServer(server.id, {
           status: isOnline ? "online" : "offline",
           lastCheckedAt: new Date(),
         });
-
         return { online: isOnline, rdpRemotePort };
       } catch {
         return { online: false, rdpRemotePort: allocateRdpPort(server.id) };
@@ -867,38 +955,14 @@ try {
     }),
 
   /**
-   * Check all tunnels by querying the frps dashboard API.
+   * Check all tunnels by querying BOTH frps dashboards (modern + legacy).
    * Updates server status in DB.
    */
   checkAllTunnels: protectedProcedure.mutation(async () => {
     try {
-      const dashboardAddr = process.env.FRP_DASHBOARD_ADDR ?? "127.0.0.1";
-      const dashboardPort = parseInt(process.env.FRP_DASHBOARD_PORT ?? "7500");
-      const dashUser = process.env.FRP_DASHBOARD_USER ?? "admin";
-      const dashPass = process.env.FRP_DASHBOARD_PASS ?? "admin";
-
-      const auth = Buffer.from(`${dashUser}:${dashPass}`).toString("base64");
-      const response = await fetch(
-        `http://${dashboardAddr}:${dashboardPort}/api/proxy/tcp`,
-        {
-          headers: { Authorization: `Basic ${auth}` },
-          signal: AbortSignal.timeout(5000),
-        }
-      );
-
-      if (!response.ok) return { updated: 0, frpsOnline: false };
-
-      const data = await response.json() as { proxies?: Array<{ status: string; conf?: { remotePort?: number } }> };
-      const proxies = data.proxies ?? [];
-      const onlinePorts = new Set(
-        proxies
-          .filter((p) => p.status === "online" && p.conf?.remotePort)
-          .map((p) => p.conf!.remotePort!)
-      );
-
+      const onlinePorts = await fetchAllOnlineProxyPorts();
       const allServers = await db.getServers();
       let updated = 0;
-
       for (const server of allServers) {
         const rdpRemotePort = allocateRdpPort(server.id);
         const isOnline = onlinePorts.has(rdpRemotePort);
@@ -908,7 +972,6 @@ try {
           updated++;
         }
       }
-
       return { updated, frpsOnline: true };
     } catch {
       return { updated: 0, frpsOnline: false };
