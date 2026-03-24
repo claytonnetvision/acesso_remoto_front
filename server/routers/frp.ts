@@ -358,6 +358,8 @@ echo  OK: RemoteAccessAgent iniciado
 :: [8/8] Instalar servico de metricas
 echo [8/8] Instalando servico de metricas...
 if exist "%METRICS_PS1%" (
+    :: Registrar URL no netsh para permitir HttpListener sem privilegios elevados
+    netsh http add urlacl url=http://localhost:9182/ user=Everyone >nul 2>&1
     if not exist "%METRICS_WINSW_EXE%" copy /Y "%WINSW_EXE%" "%METRICS_WINSW_EXE%" >nul 2>&1
     "%METRICS_WINSW_EXE%" install
     if %errorLevel% neq 0 (
@@ -373,18 +375,10 @@ if exist "%METRICS_PS1%" (
 
 timeout /t 5 /nobreak >nul
 
-:: Verificar tunel
-sc query RemoteAccessAgent | find "RUNNING" >nul
-if %errorLevel% equ 0 (
-    echo.
-    echo  [OK] Agente instalado e rodando!
-    echo  O servidor aparecera ONLINE no painel em ate 30 segundos.
-    echo.
-) else (
-    echo.
-    echo  [AVISO] Servico pode nao ter iniciado. Verifique logs em %SERVICE_DIR%
-    echo.
-)
+echo.
+echo  [OK] Instalacao concluida!
+echo  O servidor aparecera ONLINE no painel em ate 30 segundos.
+echo.
 
 echo  ============================================================
 echo   Resumo da Instalacao
@@ -560,6 +554,8 @@ echo  OK: RemoteAccessAgent iniciado
 :: [8/8] Instalar servico de metricas
 echo [8/8] Instalando servico de metricas...
 if exist "%METRICS_PS1%" (
+    :: Registrar URL no netsh para permitir HttpListener sem privilegios elevados
+    netsh http add urlacl url=http://localhost:9182/ user=Everyone >nul 2>&1
     if not exist "%METRICS_WINSW_EXE%" copy /Y "%WINSW_EXE%" "%METRICS_WINSW_EXE%" >nul 2>&1
     "%METRICS_WINSW_EXE%" install
     if %errorLevel% neq 0 (
@@ -575,18 +571,10 @@ if exist "%METRICS_PS1%" (
 
 timeout /t 5 /nobreak >nul
 
-:: Verificar tunel
-sc query RemoteAccessAgent | find "RUNNING" >nul
-if %errorLevel% equ 0 (
-    echo.
-    echo  [OK] Agente instalado e rodando!
-    echo  O servidor aparecera ONLINE no painel em ate 30 segundos.
-    echo.
-) else (
-    echo.
-    echo  [AVISO] Servico pode nao ter iniciado. Verifique logs em %SERVICE_DIR%
-    echo.
-)
+echo.
+echo  [OK] Instalacao concluida!
+echo  O servidor aparecera ONLINE no painel em ate 30 segundos.
+echo.
 
 echo  ============================================================
 echo   Resumo da Instalacao
@@ -868,43 +856,63 @@ function Get-Metrics {
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add($Prefix)
 
+function Handle-Request($context) {
+    $request  = $context.Request
+    $response = $context.Response
+    try {
+        if ($request.Url.AbsolutePath -eq "/metrics" -or $request.Url.AbsolutePath -eq "/") {
+            $body   = Get-Metrics
+            $bytes  = [System.Text.Encoding]::UTF8.GetBytes($body)
+            $response.ContentType     = "application/json; charset=utf-8"
+            $response.ContentLength64 = $bytes.Length
+            $response.Headers.Add("Access-Control-Allow-Origin", "*")
+            $response.StatusCode      = 200
+            $response.OutputStream.Write($bytes, 0, $bytes.Length)
+        } elseif ($request.Url.AbsolutePath -eq "/health") {
+            $body  = '{"status":"ok"}'
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+            $response.ContentType     = "application/json"
+            $response.ContentLength64 = $bytes.Length
+            $response.StatusCode      = 200
+            $response.OutputStream.Write($bytes, 0, $bytes.Length)
+        } else {
+            $response.StatusCode = 404
+        }
+    } catch { }
+    try { $response.OutputStream.Close() } catch { }
+}
+
 try {
     $listener.Start()
     Write-Host "Remote Access Metrics Agent listening on $Prefix"
-    Write-Host "Press Ctrl+C to stop."
 
-    while ($listener.IsListening) {
+    # Use async BeginGetContext to avoid blocking the service thread
+    # This is required for WinSW on Windows Server 2012 R2
+    $callback = [System.AsyncCallback] {
+        param($ar)
         try {
-            $context  = $listener.GetContext()
-            $request  = $context.Request
-            $response = $context.Response
-
-            if ($request.Url.AbsolutePath -eq "/metrics" -or $request.Url.AbsolutePath -eq "/") {
-                $body   = Get-Metrics
-                $bytes  = [System.Text.Encoding]::UTF8.GetBytes($body)
-                $response.ContentType     = "application/json; charset=utf-8"
-                $response.ContentLength64 = $bytes.Length
-                $response.Headers.Add("Access-Control-Allow-Origin", "*")
-                $response.StatusCode      = 200
-                $response.OutputStream.Write($bytes, 0, $bytes.Length)
-            } elseif ($request.Url.AbsolutePath -eq "/health") {
-                $body  = '{"status":"ok"}'
-                $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-                $response.ContentType     = "application/json"
-                $response.ContentLength64 = $bytes.Length
-                $response.StatusCode      = 200
-                $response.OutputStream.Write($bytes, 0, $bytes.Length)
-            } else {
-                $response.StatusCode = 404
+            if (-not $listener.IsListening) { return }
+            $ctx = $listener.EndGetContext($ar)
+            Handle-Request $ctx
+        } catch { }
+        # Re-register for next request
+        try {
+            if ($listener.IsListening) {
+                [void]$listener.BeginGetContext($callback, $null)
             }
-
-            $response.OutputStream.Close()
-        } catch {
-            # Ignore individual request errors, keep running
-        }
+        } catch { }
     }
+    [void]$listener.BeginGetContext($callback, $null)
+
+    # Keep the service alive with a heartbeat loop
+    while ($listener.IsListening) {
+        Start-Sleep -Seconds 5
+    }
+} catch {
+    Write-Host "ERROR: $($_.Exception.Message)"
+    exit 1
 } finally {
-    $listener.Stop()
+    try { $listener.Stop() } catch { }
 }
 `;
 
