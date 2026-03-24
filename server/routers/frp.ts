@@ -335,15 +335,13 @@ if %errorLevel% equ 0 (
 sc query RemoteAccessMetrics >nul 2>&1
 if %errorLevel% equ 0 (
     echo  Removendo servico de metricas antigo...
+    sc stop RemoteAccessMetrics >nul 2>&1
+    timeout /t 3 /nobreak >nul
     if exist "%METRICS_WINSW_EXE%" (
-        "%METRICS_WINSW_EXE%" stop >nul 2>&1
-        timeout /t 2 /nobreak >nul
         "%METRICS_WINSW_EXE%" uninstall >nul 2>&1
-    ) else (
-        sc stop RemoteAccessMetrics >nul 2>&1
-        sc delete RemoteAccessMetrics >nul 2>&1
     )
-    timeout /t 2 /nobreak >nul
+    sc delete RemoteAccessMetrics >nul 2>&1
+    timeout /t 3 /nobreak >nul
 )
 
 "%WINSW_EXE%" install
@@ -531,15 +529,13 @@ if %errorLevel% equ 0 (
 sc query RemoteAccessMetrics >nul 2>&1
 if %errorLevel% equ 0 (
     echo  Removendo servico de metricas antigo...
+    sc stop RemoteAccessMetrics >nul 2>&1
+    timeout /t 3 /nobreak >nul
     if exist "%METRICS_WINSW_EXE%" (
-        "%METRICS_WINSW_EXE%" stop >nul 2>&1
-        timeout /t 2 /nobreak >nul
         "%METRICS_WINSW_EXE%" uninstall >nul 2>&1
-    ) else (
-        sc stop RemoteAccessMetrics >nul 2>&1
-        sc delete RemoteAccessMetrics >nul 2>&1
     )
-    timeout /t 2 /nobreak >nul
+    sc delete RemoteAccessMetrics >nul 2>&1
+    timeout /t 3 /nobreak >nul
 )
 
 "%WINSW_EXE%" install
