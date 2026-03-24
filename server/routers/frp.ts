@@ -293,11 +293,10 @@ echo  OK: winsw.exe
 
 :: [6/8] Criar XMLs de servico
 echo [6/8] Criando configuracoes de servico...
-
-:: Criar XML do tunel (winsw.xml) - WinSW usa XML com mesmo nome do exe
 (echo ^<service^>) > "%WINSW_XML%"
 (echo   ^<id^>RemoteAccessAgent^</id^>) >> "%WINSW_XML%"
 (echo   ^<name^>Remote Access Manager Agent^</name^>) >> "%WINSW_XML%"
+(echo   ^<description^>Maintains secure tunnel to Remote Access Manager server^</description^>) >> "%WINSW_XML%"
 (echo   ^<executable^>%FRPC_EXE%^</executable^>) >> "%WINSW_XML%"
 (echo   ^<arguments^>-c %FRPC_CFG%^</arguments^>) >> "%WINSW_XML%"
 (echo   ^<log mode='roll' /^>) >> "%WINSW_XML%"
@@ -306,12 +305,15 @@ echo [6/8] Criando configuracoes de servico...
 (echo   ^<onfailure action='restart' delay='30 sec' /^>) >> "%WINSW_XML%"
 (echo ^</service^>) >> "%WINSW_XML%"
 
-:: Criar XML de metricas (metrics-winsw.xml)
+:: Generate WinSW XML config for metrics agent
+:: IMPORTANT: WinSW uses XML with same name as the executable.
+:: We copy winsw.exe -> metrics-winsw.exe and create metrics-winsw.xml
 if exist "%METRICS_PS1%" (
     copy /Y "%WINSW_EXE%" "%METRICS_WINSW_EXE%" >nul 2>&1
     (echo ^<service^>) > "%METRICS_XML%"
     (echo   ^<id^>RemoteAccessMetrics^</id^>) >> "%METRICS_XML%"
     (echo   ^<name^>Remote Access Metrics Agent^</name^>) >> "%METRICS_XML%"
+    (echo   ^<description^>Collects CPU/RAM/Disk metrics for Remote Access Manager^</description^>) >> "%METRICS_XML%"
     (echo   ^<executable^>powershell.exe^</executable^>) >> "%METRICS_XML%"
     (echo   ^<arguments^>-ExecutionPolicy Bypass -NonInteractive -File %METRICS_PS1%^</arguments^>) >> "%METRICS_XML%"
     (echo   ^<log mode='roll' /^>) >> "%METRICS_XML%"
@@ -508,6 +510,7 @@ echo [6/8] Criando configuracoes de servico...
 (echo ^<service^>) > "%WINSW_XML%"
 (echo   ^<id^>RemoteAccessAgent^</id^>) >> "%WINSW_XML%"
 (echo   ^<name^>Remote Access Manager Agent^</name^>) >> "%WINSW_XML%"
+(echo   ^<description^>Maintains secure tunnel to Remote Access Manager server^</description^>) >> "%WINSW_XML%"
 (echo   ^<executable^>%FRPC_EXE%^</executable^>) >> "%WINSW_XML%"
 (echo   ^<arguments^>-c %FRPC_CFG%^</arguments^>) >> "%WINSW_XML%"
 (echo   ^<log mode='roll' /^>) >> "%WINSW_XML%"
@@ -522,6 +525,7 @@ if exist "%METRICS_PS1%" (
     (echo ^<service^>) > "%METRICS_XML%"
     (echo   ^<id^>RemoteAccessMetrics^</id^>) >> "%METRICS_XML%"
     (echo   ^<name^>Remote Access Metrics Agent^</name^>) >> "%METRICS_XML%"
+    (echo   ^<description^>Collects CPU/RAM/Disk metrics for Remote Access Manager^</description^>) >> "%METRICS_XML%"
     (echo   ^<executable^>powershell.exe^</executable^>) >> "%METRICS_XML%"
     (echo   ^<arguments^>-ExecutionPolicy Bypass -NonInteractive -File %METRICS_PS1%^</arguments^>) >> "%METRICS_XML%"
     (echo   ^<log mode='roll' /^>) >> "%METRICS_XML%"
