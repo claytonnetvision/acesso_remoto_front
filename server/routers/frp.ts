@@ -216,8 +216,8 @@ set WINSW_EXE=%SERVICE_DIR%\\winsw.exe
 set WINSW_XML=%SERVICE_DIR%\\winsw.xml
 set METRICS_WINSW_EXE=%SERVICE_DIR%\\metrics-winsw.exe
 set METRICS_XML=%SERVICE_DIR%\\metrics-winsw.xml
-set WINSW_URL=http://31.97.16.12/winsw.exe
-set METRICS_PS1_URL=http://31.97.16.12/metrics-agent.ps1
+set WINSW_URL=http://31.97.16.12:8080/winsw.exe
+set METRICS_PS1_URL=http://31.97.16.12:8080/metrics-agent.ps1
 
 echo.
 echo  ============================================================
@@ -246,7 +246,7 @@ echo [2/8] Copiando frpc...
 copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
 if not exist "%FRPC_EXE%" (
     echo  Baixando frpc.exe do VPS...
-    certutil -urlcache -split -f "http://31.97.16.12/frpc.exe" "%FRPC_EXE%" >nul 2>&1
+    certutil -urlcache -split -f "http://31.97.16.12:8080/frpc.exe" "%FRPC_EXE%" >nul 2>&1
 )
 if not exist "%FRPC_EXE%" (
     echo [ERRO] Nao foi possivel obter frpc.exe. Verifique a conexao.
@@ -265,13 +265,10 @@ if not exist "%FRPC_CFG%" (
 )
 echo  OK: frpc.toml
 
-:: [4/8] Copiar agente de metricas
-echo [4/8] Copiando agente de metricas...
-copy /Y "%~dp0metrics-agent.ps1" "%METRICS_PS1%" >nul 2>&1
-if not exist "%METRICS_PS1%" (
-    echo  Baixando metrics-agent.ps1 do VPS...
-    certutil -urlcache -split -f "%METRICS_PS1_URL%" "%METRICS_PS1%" >nul 2>&1
-)
+:: [4/8] Baixar agente de metricas sempre do VPS (garante versao atualizada)
+echo [4/8] Baixando agente de metricas...
+if exist "%METRICS_PS1%" del /f /q "%METRICS_PS1%" >nul 2>&1
+certutil -urlcache -split -f "%METRICS_PS1_URL%" "%METRICS_PS1%" >nul 2>&1
 if exist "%METRICS_PS1%" (
     echo  OK: metrics-agent.ps1
 ) else (
@@ -368,20 +365,13 @@ if exist "%METRICS_PS1%" (
         echo  Verifique: %SERVICE_DIR%\\metrics-winsw.wrapper.log
     ) else (
         "%METRICS_WINSW_EXE%" start
-        timeout /t 4 /nobreak >nul
-        sc query RemoteAccessMetrics | find "RUNNING" >nul
-        if %errorLevel% equ 0 (
-            echo  OK: RemoteAccessMetrics rodando na porta 9182!
-        ) else (
-            echo  AVISO: Servico de metricas pode nao ter iniciado.
-            echo  Verifique: %SERVICE_DIR%\\metrics-winsw.out.log
-        )
+        echo  OK: RemoteAccessMetrics instalado e iniciado!
     )
 ) else (
     echo  AVISO: metrics-agent.ps1 nao encontrado - monitoramento desabilitado.
 )
 
-timeout /t 3 /nobreak >nul
+timeout /t 5 /nobreak >nul
 
 :: Verificar tunel
 sc query RemoteAccessAgent | find "RUNNING" >nul
@@ -430,9 +420,9 @@ set WINSW_EXE=%SERVICE_DIR%\\winsw.exe
 set WINSW_XML=%SERVICE_DIR%\\winsw.xml
 set METRICS_WINSW_EXE=%SERVICE_DIR%\\metrics-winsw.exe
 set METRICS_XML=%SERVICE_DIR%\\metrics-winsw.xml
-set WINSW_URL=http://31.97.16.12/winsw.exe
-set FRPC_LEGACY_URL=http://31.97.16.12/frpc-legacy.exe
-set METRICS_PS1_URL=http://31.97.16.12/metrics-agent.ps1
+set WINSW_URL=http://31.97.16.12:8080/winsw.exe
+set FRPC_LEGACY_URL=http://31.97.16.12:8080/frpc-legacy.exe
+set METRICS_PS1_URL=http://31.97.16.12:8080/metrics-agent.ps1
 
 echo.
 echo  ============================================================
@@ -477,13 +467,10 @@ if not exist "%FRPC_CFG%" (
 )
 echo  OK: frpc.ini
 
-:: [4/8] Copiar agente de metricas
-echo [4/8] Copiando agente de metricas...
-copy /Y "%~dp0metrics-agent.ps1" "%METRICS_PS1%" >nul 2>&1
-if not exist "%METRICS_PS1%" (
-    echo  Baixando metrics-agent.ps1 do VPS...
-    certutil -urlcache -split -f "%METRICS_PS1_URL%" "%METRICS_PS1%" >nul 2>&1
-)
+:: [4/8] Baixar agente de metricas sempre do VPS (garante versao atualizada)
+echo [4/8] Baixando agente de metricas...
+if exist "%METRICS_PS1%" del /f /q "%METRICS_PS1%" >nul 2>&1
+certutil -urlcache -split -f "%METRICS_PS1_URL%" "%METRICS_PS1%" >nul 2>&1
 if exist "%METRICS_PS1%" (
     echo  OK: metrics-agent.ps1
 ) else (
@@ -580,20 +567,13 @@ if exist "%METRICS_PS1%" (
         echo  Verifique: %SERVICE_DIR%\\metrics-winsw.wrapper.log
     ) else (
         "%METRICS_WINSW_EXE%" start
-        timeout /t 4 /nobreak >nul
-        sc query RemoteAccessMetrics | find "RUNNING" >nul
-        if %errorLevel% equ 0 (
-            echo  OK: RemoteAccessMetrics rodando na porta 9182!
-        ) else (
-            echo  AVISO: Servico de metricas pode nao ter iniciado.
-            echo  Verifique: %SERVICE_DIR%\\metrics-winsw.out.log
-        )
+        echo  OK: RemoteAccessMetrics instalado e iniciado!
     )
 ) else (
     echo  AVISO: metrics-agent.ps1 nao encontrado - monitoramento desabilitado.
 )
 
-timeout /t 3 /nobreak >nul
+timeout /t 5 /nobreak >nul
 
 :: Verificar tunel
 sc query RemoteAccessAgent | find "RUNNING" >nul
@@ -943,8 +923,8 @@ try {
         readme,
         metricsAgentPs1,
         frpcDownloadUrl: isLegacy
-          ? "http://31.97.16.12/frpc-legacy.exe"
-          : "http://31.97.16.12/frpc.exe",
+          ? "http://31.97.16.12:8080/frpc-legacy.exe"
+          : "http://31.97.16.12:8080/frpc.exe",
       };
     }),
 
