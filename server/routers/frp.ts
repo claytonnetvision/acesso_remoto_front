@@ -40,12 +40,12 @@ async function fetchOnlinePortsFromDashboard(
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) return new Set();
-    const data = await response.json() as { proxies?: Array<{ status: string; conf?: { remotePort?: number } }> };
+    const data = await response.json() as { proxies?: Array<{ status: string; conf?: { remotePort?: number; remote_port?: number } }> };
     const proxies = data.proxies ?? [];
     return new Set(
       proxies
-        .filter((p) => p.status === "online" && p.conf?.remotePort)
-        .map((p) => p.conf!.remotePort!)
+        .filter((p) => p.status === "online" && (p.conf?.remotePort ?? p.conf?.remote_port))
+        .map((p) => (p.conf!.remotePort ?? p.conf!.remote_port)!)
     );
   } catch {
     return new Set();
@@ -533,7 +533,8 @@ if exist "%METRICS_PS1%" (
     echo   ^<name^>Remote Access Metrics Agent^</name^> >> "%METRICS_XML%"
     echo   ^<description^>Collects CPU/RAM/Disk metrics for Remote Access Manager^</description^> >> "%METRICS_XML%"
     echo   ^<executable^>powershell.exe^</executable^> >> "%METRICS_XML%"
-    echo   ^<arguments^>-ExecutionPolicy Bypass -NonInteractive -File "%METRICS_PS1%"^</arguments^> >> "%METRICS_XML%"
+    set METRICS_ARGS=-ExecutionPolicy Bypass -NonInteractive -File %METRICS_PS1%
+    echo   ^<arguments^>!METRICS_ARGS!^</arguments^> >> "%METRICS_XML%"
     echo   ^<log mode="roll"^>^</log^> >> "%METRICS_XML%"
     echo   ^<onfailure action="restart" delay="30 sec"/^> >> "%METRICS_XML%"
     echo   ^<onfailure action="restart" delay="60 sec"/^> >> "%METRICS_XML%"
