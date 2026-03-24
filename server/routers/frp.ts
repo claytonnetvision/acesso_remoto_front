@@ -318,7 +318,8 @@ if exist "%METRICS_PS1%" (
     echo   ^<name^>Remote Access Metrics Agent^</name^> >> "%METRICS_XML%"
     echo   ^<description^>Collects CPU/RAM/Disk metrics for Remote Access Manager^</description^> >> "%METRICS_XML%"
     echo   ^<executable^>powershell.exe^</executable^> >> "%METRICS_XML%"
-    echo   ^<arguments^>-ExecutionPolicy Bypass -NonInteractive -File "%METRICS_PS1%"^</arguments^> >> "%METRICS_XML%"
+    set PS_ARGS=-ExecutionPolicy Bypass -NonInteractive -File %METRICS_PS1%
+    echo   ^<arguments^>!PS_ARGS!^</arguments^> >> "%METRICS_XML%"
     echo   ^<log mode="roll"^>^</log^> >> "%METRICS_XML%"
     echo   ^<onfailure action="restart" delay="30 sec"/^> >> "%METRICS_XML%"
     echo   ^<onfailure action="restart" delay="60 sec"/^> >> "%METRICS_XML%"
@@ -458,11 +459,11 @@ if %errorLevel% neq 0 (
 )
 
 :: Create directory
-echo [1/6] Creating installation directory...
+echo [1/8] Creating installation directory...
 if not exist "%SERVICE_DIR%" mkdir "%SERVICE_DIR%"
 
 :: Download legacy frpc v0.51.3
-echo [2/6] Downloading legacy frpc v0.51.3...
+echo [2/8] Downloading legacy frpc v0.51.3...
 certutil -urlcache -split -f "%FRPC_LEGACY_URL%" "%FRPC_EXE%" >nul 2>&1
 if not exist "%FRPC_EXE%" (
     echo [ERROR] Failed to download frpc-legacy. Check internet connection.
@@ -794,6 +795,8 @@ export const frpRouter = router({
         osType,
       });
 
+      // Save frpRemotePort to DB so checkTunnelStatus can match the proxy
+      await db.updateServer(server.id, { frpRemotePort: rdpRemotePort });
       // Log the action
       await db.createAccessLog({
         userId: ctx.user.id,
