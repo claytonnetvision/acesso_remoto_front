@@ -324,6 +324,12 @@ if exist "%METRICS_PS1%" (
 
 :: [7/8] Remover servicos antigos e instalar tunel
 echo [7/8] Instalando servico de tunel...
+
+:: Mostrar token configurado para diagnostico
+for /f "tokens=3" %%t in ('findstr /i "^token" "%FRPC_CFG%" 2^>nul') do (
+    echo  INFO: Token no frpc.ini = %%t
+)
+
 sc query RemoteAccessAgent >nul 2>&1
 if %errorLevel% equ 0 (
     echo  Removendo servico antigo...
@@ -352,6 +358,15 @@ if %errorLevel% neq 0 (
 )
 "%WINSW_EXE%" start
 echo  OK: RemoteAccessAgent iniciado
+
+:: Aguardar 8 segundos e verificar se o tunel conectou
+timeout /t 8 /nobreak >nul
+echo  Verificando conexao do tunel...
+if exist "%SERVICE_DIR%\winsw.out.log" (
+    findstr /i "token\|login\|start frpc\|connected\|error\|failed" "%SERVICE_DIR%\winsw.out.log" 2>nul
+) else (
+    echo  AVISO: Log do tunel nao encontrado ainda.
+)
 
 :: [8/8] Instalar servico de metricas
 echo [8/8] Instalando servico de metricas...
@@ -518,6 +533,12 @@ if exist "%METRICS_PS1%" (
 
 :: [7/8] Remover servicos antigos e instalar tunel
 echo [7/8] Instalando servico de tunel...
+
+:: Mostrar token configurado para diagnostico
+for /f "tokens=3" %%t in ('findstr /i "^token" "%FRPC_CFG%" 2^>nul') do (
+    echo  INFO: Token no frpc.ini = %%t
+)
+
 sc query RemoteAccessAgent >nul 2>&1
 if %errorLevel% equ 0 (
     echo  Removendo servico antigo...
@@ -546,6 +567,15 @@ if %errorLevel% neq 0 (
 )
 "%WINSW_EXE%" start
 echo  OK: RemoteAccessAgent iniciado
+
+:: Aguardar 8 segundos e verificar se o tunel conectou
+timeout /t 8 /nobreak >nul
+echo  Verificando conexao do tunel...
+if exist "%SERVICE_DIR%\winsw.out.log" (
+    findstr /i "token\|login\|start frpc\|connected\|error\|failed" "%SERVICE_DIR%\winsw.out.log" 2>nul
+) else (
+    echo  AVISO: Log do tunel nao encontrado ainda.
+)
 
 :: [8/8] Instalar servico de metricas
 echo [8/8] Instalando servico de metricas...
@@ -728,10 +758,10 @@ export const frpRouter = router({
       // Use global frps token (all agents use the same token configured in frps.toml)
       // The frps on VPS uses auth.method="token" with a single global token
       // Per-server token auth via httpPlugin was removed due to mux stream EOF issues
-      const globalToken = process.env.FRP_TOKEN ?? "RemoteManager2024@frp";
+      const globalToken = process.env.FRP_TOKEN ?? process.env.FRP_LEGACY_TOKEN ?? "MinhaChaveFrp@2024Segura";
       const token = globalToken;
       // Legacy frps uses the same global token approach
-      const legacyToken = process.env.FRP_LEGACY_TOKEN ?? "RemoteManager2024@frp";
+      const legacyToken = process.env.FRP_LEGACY_TOKEN ?? process.env.FRP_TOKEN ?? "MinhaChaveFrp@2024Segura";
 
       // Always generate both configs for reference
       const frpcToml = generateFrpcToml({
