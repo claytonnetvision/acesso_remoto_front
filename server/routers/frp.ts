@@ -300,10 +300,10 @@ echo [6/8] Criando configuracoes de servico...
 (echo   ^<name^>Remote Access Manager Agent^</name^>) >> "%WINSW_XML%"
 (echo   ^<executable^>%FRPC_EXE%^</executable^>) >> "%WINSW_XML%"
 (echo   ^<arguments^>-c %FRPC_CFG%^</arguments^>) >> "%WINSW_XML%"
-(echo   ^<log mode=roll /^>) >> "%WINSW_XML%"
-(echo   ^<onfailure action=restart delay=5sec /^>) >> "%WINSW_XML%"
-(echo   ^<onfailure action=restart delay=10sec /^>) >> "%WINSW_XML%"
-(echo   ^<onfailure action=restart delay=30sec /^>) >> "%WINSW_XML%"
+(echo   ^<log mode='roll' /^>) >> "%WINSW_XML%"
+(echo   ^<onfailure action='restart' delay='5 sec' /^>) >> "%WINSW_XML%"
+(echo   ^<onfailure action='restart' delay='10 sec' /^>) >> "%WINSW_XML%"
+(echo   ^<onfailure action='restart' delay='30 sec' /^>) >> "%WINSW_XML%"
 (echo ^</service^>) >> "%WINSW_XML%"
 
 :: Criar XML de metricas (metrics-winsw.xml)
@@ -314,9 +314,9 @@ if exist "%METRICS_PS1%" (
     (echo   ^<name^>Remote Access Metrics Agent^</name^>) >> "%METRICS_XML%"
     (echo   ^<executable^>powershell.exe^</executable^>) >> "%METRICS_XML%"
     (echo   ^<arguments^>-ExecutionPolicy Bypass -NonInteractive -File %METRICS_PS1%^</arguments^>) >> "%METRICS_XML%"
-    (echo   ^<log mode=roll /^>) >> "%METRICS_XML%"
-    (echo   ^<onfailure action=restart delay=30sec /^>) >> "%METRICS_XML%"
-    (echo   ^<onfailure action=restart delay=60sec /^>) >> "%METRICS_XML%"
+    (echo   ^<log mode='roll' /^>) >> "%METRICS_XML%"
+    (echo   ^<onfailure action='restart' delay='30 sec' /^>) >> "%METRICS_XML%"
+    (echo   ^<onfailure action='restart' delay='60 sec' /^>) >> "%METRICS_XML%"
     (echo ^</service^>) >> "%METRICS_XML%"
     echo  OK: XMLs criados
 ) else (
@@ -510,10 +510,10 @@ echo [6/8] Criando configuracoes de servico...
 (echo   ^<name^>Remote Access Manager Agent^</name^>) >> "%WINSW_XML%"
 (echo   ^<executable^>%FRPC_EXE%^</executable^>) >> "%WINSW_XML%"
 (echo   ^<arguments^>-c %FRPC_CFG%^</arguments^>) >> "%WINSW_XML%"
-(echo   ^<log mode=roll /^>) >> "%WINSW_XML%"
-(echo   ^<onfailure action=restart delay=5sec /^>) >> "%WINSW_XML%"
-(echo   ^<onfailure action=restart delay=10sec /^>) >> "%WINSW_XML%"
-(echo   ^<onfailure action=restart delay=30sec /^>) >> "%WINSW_XML%"
+(echo   ^<log mode='roll' /^>) >> "%WINSW_XML%"
+(echo   ^<onfailure action='restart' delay='5 sec' /^>) >> "%WINSW_XML%"
+(echo   ^<onfailure action='restart' delay='10 sec' /^>) >> "%WINSW_XML%"
+(echo   ^<onfailure action='restart' delay='30 sec' /^>) >> "%WINSW_XML%"
 (echo ^</service^>) >> "%WINSW_XML%"
 
 :: Criar XML de metricas (metrics-winsw.xml)
@@ -524,9 +524,9 @@ if exist "%METRICS_PS1%" (
     (echo   ^<name^>Remote Access Metrics Agent^</name^>) >> "%METRICS_XML%"
     (echo   ^<executable^>powershell.exe^</executable^>) >> "%METRICS_XML%"
     (echo   ^<arguments^>-ExecutionPolicy Bypass -NonInteractive -File %METRICS_PS1%^</arguments^>) >> "%METRICS_XML%"
-    (echo   ^<log mode=roll /^>) >> "%METRICS_XML%"
-    (echo   ^<onfailure action=restart delay=30sec /^>) >> "%METRICS_XML%"
-    (echo   ^<onfailure action=restart delay=60sec /^>) >> "%METRICS_XML%"
+    (echo   ^<log mode='roll' /^>) >> "%METRICS_XML%"
+    (echo   ^<onfailure action='restart' delay='30 sec' /^>) >> "%METRICS_XML%"
+    (echo   ^<onfailure action='restart' delay='60 sec' /^>) >> "%METRICS_XML%"
     (echo ^</service^>) >> "%METRICS_XML%"
     echo  OK: XMLs criados
 ) else (
