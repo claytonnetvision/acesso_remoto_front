@@ -246,10 +246,16 @@ echo [2/8] Copiando frpc...
 copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
 if not exist "%FRPC_EXE%" (
     echo  Baixando frpc.exe do VPS...
-    certutil -urlcache -split -f "http://31.97.16.12:8080/frpc.exe" "%FRPC_EXE%" >nul 2>&1
+    certutil -urlcache -f "http://31.97.16.12:8080/frpc.exe" "%FRPC_EXE%" >nul 2>&1
 )
 if not exist "%FRPC_EXE%" (
-    echo [ERRO] Nao foi possivel obter frpc.exe. Verifique a conexao.
+    echo  Tentando com PowerShell...
+    powershell -Command "(New-Object Net.WebClient).DownloadFile('http://31.97.16.12:8080/frpc.exe', '%FRPC_EXE%')" >nul 2>&1
+)
+if not exist "%FRPC_EXE%" (
+    echo [ERRO] Nao foi possivel obter frpc.exe.
+    echo  Baixe manualmente: http://31.97.16.12:8080/frpc.exe
+    echo  Coloque na mesma pasta do install.bat e execute novamente.
     pause
     exit /b 1
 )
@@ -268,7 +274,7 @@ echo  OK: frpc.toml
 :: [4/8] Baixar agente de metricas sempre do VPS (garante versao atualizada)
 echo [4/8] Baixando agente de metricas...
 if exist "%METRICS_PS1%" del /f /q "%METRICS_PS1%" >nul 2>&1
-certutil -urlcache -split -f "%METRICS_PS1_URL%" "%METRICS_PS1%" >nul 2>&1
+powershell -Command "(New-Object Net.WebClient).DownloadFile('%METRICS_PS1_URL%', '%METRICS_PS1%')" 2>nul
 if exist "%METRICS_PS1%" (
     echo  OK: metrics-agent.ps1
 ) else (
@@ -277,12 +283,22 @@ if exist "%METRICS_PS1%" (
 
 :: [5/8] Baixar WinSW
 echo [5/8] Verificando WinSW...
+:: Apagar WinSW corrompido se existir (tamanho minimo 1MB)
+if exist "%WINSW_EXE%" (
+    for %%F in ("%WINSW_EXE%") do if %%~zF LSS 1048576 del /f /q "%WINSW_EXE%" >nul 2>&1
+)
 if not exist "%WINSW_EXE%" (
-    echo  Baixando WinSW...
-    certutil -urlcache -split -f "%WINSW_URL%" "%WINSW_EXE%" >nul 2>&1
+    echo  Baixando WinSW (18MB, aguarde)...
+    powershell -Command "(New-Object Net.WebClient).DownloadFile('%WINSW_URL%', '%WINSW_EXE%')" 2>nul
 )
 if not exist "%WINSW_EXE%" (
     echo [ERRO] Nao foi possivel baixar WinSW.
+    pause
+    exit /b 1
+)
+for %%F in ("%WINSW_EXE%") do if %%~zF LSS 1048576 (
+    echo [ERRO] WinSW corrompido ^(%%~zF bytes^). Esperado ~18MB. Verifique conexao.
+    del /f /q "%WINSW_EXE%" >nul 2>&1
     pause
     exit /b 1
 )
@@ -455,10 +471,22 @@ echo  OK: %SERVICE_DIR%
 
 :: [2/8] Baixar frpc legacy v0.51.3
 echo [2/8] Baixando frpc legacy v0.51.3...
-certutil -urlcache -split -f "%FRPC_LEGACY_URL%" "%FRPC_EXE%" >nul 2>&1
+:: Apagar arquivo corrompido se existir (tamanho minimo 5MB)
+if exist "%FRPC_EXE%" (
+    for %%F in ("%FRPC_EXE%") do if %%~zF LSS 5242880 del /f /q "%FRPC_EXE%" >nul 2>&1
+)
+if not exist "%FRPC_EXE%" (
+    powershell -Command "(New-Object Net.WebClient).DownloadFile('%FRPC_LEGACY_URL%', '%FRPC_EXE%')" 2>nul
+)
 if not exist "%FRPC_EXE%" (
     echo [ERRO] Falha ao baixar frpc-legacy. Verifique a conexao.
     echo  URL: %FRPC_LEGACY_URL%
+    pause
+    exit /b 1
+)
+for %%F in ("%FRPC_EXE%") do if %%~zF LSS 5242880 (
+    echo [ERRO] frpc-legacy corrompido ^(%%~zF bytes^). Esperado ~10MB. Verifique conexao.
+    del /f /q "%FRPC_EXE%" >nul 2>&1
     pause
     exit /b 1
 )
@@ -477,7 +505,7 @@ echo  OK: frpc.ini
 :: [4/8] Baixar agente de metricas sempre do VPS (garante versao atualizada)
 echo [4/8] Baixando agente de metricas...
 if exist "%METRICS_PS1%" del /f /q "%METRICS_PS1%" >nul 2>&1
-certutil -urlcache -split -f "%METRICS_PS1_URL%" "%METRICS_PS1%" >nul 2>&1
+powershell -Command "(New-Object Net.WebClient).DownloadFile('%METRICS_PS1_URL%', '%METRICS_PS1%')" 2>nul
 if exist "%METRICS_PS1%" (
     echo  OK: metrics-agent.ps1
 ) else (
@@ -486,12 +514,22 @@ if exist "%METRICS_PS1%" (
 
 :: [5/8] Baixar WinSW
 echo [5/8] Verificando WinSW...
+:: Apagar WinSW corrompido se existir (tamanho minimo 1MB)
+if exist "%WINSW_EXE%" (
+    for %%F in ("%WINSW_EXE%") do if %%~zF LSS 1048576 del /f /q "%WINSW_EXE%" >nul 2>&1
+)
 if not exist "%WINSW_EXE%" (
-    echo  Baixando WinSW...
-    certutil -urlcache -split -f "%WINSW_URL%" "%WINSW_EXE%" >nul 2>&1
+    echo  Baixando WinSW (18MB, aguarde)...
+    powershell -Command "(New-Object Net.WebClient).DownloadFile('%WINSW_URL%', '%WINSW_EXE%')" 2>nul
 )
 if not exist "%WINSW_EXE%" (
     echo [ERRO] Nao foi possivel baixar WinSW.
+    pause
+    exit /b 1
+)
+for %%F in ("%WINSW_EXE%") do if %%~zF LSS 1048576 (
+    echo [ERRO] WinSW corrompido ^(%%~zF bytes^). Esperado ~18MB. Verifique conexao.
+    del /f /q "%WINSW_EXE%" >nul 2>&1
     pause
     exit /b 1
 )
