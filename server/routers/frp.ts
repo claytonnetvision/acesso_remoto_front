@@ -242,29 +242,14 @@ if not exist "%SERVICE_DIR%" mkdir "%SERVICE_DIR%"
 echo  OK: %SERVICE_DIR%
 
 :: [2/8] Copiar frpc.exe
-echo [2/8] Copiando frpc...
-:: Verificar se frpc.exe do pacote e valido (minimo 5MB)
-if exist "%~dp0frpc.exe" (
-    for %%F in ("%~dp0frpc.exe") do set FRPC_SRC_SIZE=%%~zF
-)
-if defined FRPC_SRC_SIZE (
-    if !FRPC_SRC_SIZE! GEQ 5242880 copy /Y "%~dp0frpc.exe" "%FRPC_EXE%" >nul 2>&1
-)
-:: Baixar do VPS se nao existir ou invalido
+echo [2/8] Baixando frpc...
+:: Sempre baixar frpc.exe do VPS para garantir versao correta
+if exist "%FRPC_EXE%" del /f /q "%FRPC_EXE%" >nul 2>&1
+echo  Baixando frpc.exe (15MB, aguarde)...
+powershell -Command "(New-Object Net.WebClient).DownloadFile('http://31.97.16.12:8080/frpc.exe', '%FRPC_EXE%')" 2>nul
 if not exist "%FRPC_EXE%" (
-    echo  Baixando frpc.exe do VPS (15MB, aguarde)...
-    powershell -Command "(New-Object Net.WebClient).DownloadFile('http://31.97.16.12:8080/frpc.exe', '%FRPC_EXE%')" 2>nul
-)
-if not exist "%FRPC_EXE%" (
-    echo [ERRO] Nao foi possivel obter frpc.exe.
-    echo  Baixe manualmente: http://31.97.16.12:8080/frpc.exe
-    pause
-    exit /b 1
-)
-for %%F in ("%FRPC_EXE%") do set FRPC_SIZE=%%~zF
-if !FRPC_SIZE! LSS 5242880 (
-    echo [ERRO] frpc.exe corrompido ^(!FRPC_SIZE! bytes^). Esperado ~15MB.
-    del /f /q "%FRPC_EXE%" >nul 2>&1
+    echo [ERRO] Nao foi possivel baixar frpc.exe do VPS.
+    echo  Verifique a conexao com internet e tente novamente.
     pause
     exit /b 1
 )
@@ -292,26 +277,13 @@ if exist "%METRICS_PS1%" (
 
 :: [5/8] Baixar WinSW
 echo [5/8] Verificando WinSW...
-:: Apagar WinSW corrompido se existir (tamanho minimo 1MB = 1048576 bytes)
-if exist "%WINSW_EXE%" (
-    for %%F in ("%WINSW_EXE%") do set WINSW_SIZE=%%~zF
-)
-if defined WINSW_SIZE (
-    if !WINSW_SIZE! LSS 1048576 del /f /q "%WINSW_EXE%" >nul 2>&1
-)
-if not exist "%WINSW_EXE%" (
-    echo  Baixando WinSW (18MB, aguarde)...
-    powershell -Command "(New-Object Net.WebClient).DownloadFile('%WINSW_URL%', '%WINSW_EXE%')" 2>nul
-)
+:: Sempre baixar WinSW do VPS para garantir versao correta
+if exist "%WINSW_EXE%" del /f /q "%WINSW_EXE%" >nul 2>&1
+echo  Baixando WinSW (18MB, aguarde)...
+powershell -Command "(New-Object Net.WebClient).DownloadFile('%WINSW_URL%', '%WINSW_EXE%')" 2>nul
 if not exist "%WINSW_EXE%" (
     echo [ERRO] Nao foi possivel baixar WinSW.
-    pause
-    exit /b 1
-)
-for %%F in ("%WINSW_EXE%") do set WINSW_SIZE=%%~zF
-if !WINSW_SIZE! LSS 1048576 (
-    echo [ERRO] WinSW corrompido ^(!WINSW_SIZE! bytes^). Esperado ~18MB.
-    del /f /q "%WINSW_EXE%" >nul 2>&1
+    echo  Verifique a conexao com internet e tente novamente.
     pause
     exit /b 1
 )
@@ -484,27 +456,13 @@ echo  OK: %SERVICE_DIR%
 
 :: [2/8] Baixar frpc legacy v0.51.3
 echo [2/8] Baixando frpc legacy v0.51.3...
-:: Apagar arquivo corrompido se existir (tamanho minimo 5MB)
-if exist "%FRPC_EXE%" (
-    for %%F in ("%FRPC_EXE%") do set FRPC_SIZE=%%~zF
-)
-if defined FRPC_SIZE (
-    if !FRPC_SIZE! LSS 5242880 del /f /q "%FRPC_EXE%" >nul 2>&1
-)
-if not exist "%FRPC_EXE%" (
-    echo  Baixando frpc-legacy (10MB, aguarde)...
-    powershell -Command "(New-Object Net.WebClient).DownloadFile('%FRPC_LEGACY_URL%', '%FRPC_EXE%')" 2>nul
-)
+:: Sempre baixar frpc-legacy do VPS para garantir versao correta
+if exist "%FRPC_EXE%" del /f /q "%FRPC_EXE%" >nul 2>&1
+echo  Baixando frpc-legacy (10MB, aguarde)...
+powershell -Command "(New-Object Net.WebClient).DownloadFile('%FRPC_LEGACY_URL%', '%FRPC_EXE%')" 2>nul
 if not exist "%FRPC_EXE%" (
     echo [ERRO] Falha ao baixar frpc-legacy. Verifique a conexao.
     echo  URL: %FRPC_LEGACY_URL%
-    pause
-    exit /b 1
-)
-for %%F in ("%FRPC_EXE%") do set FRPC_SIZE=%%~zF
-if !FRPC_SIZE! LSS 5242880 (
-    echo [ERRO] frpc-legacy corrompido ^(!FRPC_SIZE! bytes^). Esperado ~10MB.
-    del /f /q "%FRPC_EXE%" >nul 2>&1
     pause
     exit /b 1
 )
@@ -532,26 +490,13 @@ if exist "%METRICS_PS1%" (
 
 :: [5/8] Baixar WinSW
 echo [5/8] Verificando WinSW...
-:: Apagar WinSW corrompido se existir (tamanho minimo 1MB = 1048576 bytes)
-if exist "%WINSW_EXE%" (
-    for %%F in ("%WINSW_EXE%") do set WINSW_SIZE=%%~zF
-)
-if defined WINSW_SIZE (
-    if !WINSW_SIZE! LSS 1048576 del /f /q "%WINSW_EXE%" >nul 2>&1
-)
-if not exist "%WINSW_EXE%" (
-    echo  Baixando WinSW (18MB, aguarde)...
-    powershell -Command "(New-Object Net.WebClient).DownloadFile('%WINSW_URL%', '%WINSW_EXE%')" 2>nul
-)
+:: Sempre baixar WinSW do VPS para garantir versao correta
+if exist "%WINSW_EXE%" del /f /q "%WINSW_EXE%" >nul 2>&1
+echo  Baixando WinSW (18MB, aguarde)...
+powershell -Command "(New-Object Net.WebClient).DownloadFile('%WINSW_URL%', '%WINSW_EXE%')" 2>nul
 if not exist "%WINSW_EXE%" (
     echo [ERRO] Nao foi possivel baixar WinSW.
-    pause
-    exit /b 1
-)
-for %%F in ("%WINSW_EXE%") do set WINSW_SIZE=%%~zF
-if !WINSW_SIZE! LSS 1048576 (
-    echo [ERRO] WinSW corrompido ^(!WINSW_SIZE! bytes^). Esperado ~18MB.
-    del /f /q "%WINSW_EXE%" >nul 2>&1
+    echo  Verifique a conexao com internet e tente novamente.
     pause
     exit /b 1
 )
